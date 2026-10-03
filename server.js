@@ -2,7 +2,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { query, one, ensureSchema, hashPassword, verifyPassword } = require('./lib/db');
-const { WEEK_START_DAY, isValidDate, parseTime, shiftMinutes, weekStart, weekEnd } = require('./lib/time');
+const { WEEK_START_DAY, payday, dueWeek, addDays, isValidDate, parseTime, shiftMinutes, weekStart, weekEnd } = require('./lib/time');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -112,7 +112,7 @@ async function weeklySummary(staffId) {
     GROUP BY s.staff_id, st.name, s.week_start, p.id
     ORDER BY s.week_start DESC, st.name
   `, staffId ? [Number(staffId)] : []);
-  return rows.map((r) => ({ ...r, week_end: weekEnd(r.week_start), paid: r.payment_id != null }));
+  return rows.map((r) => ({ ...r, week_end: weekEnd(r.week_start), payday: payday(r.week_start), paid: r.payment_id != null }));
 }
 
 // ---- Auth ----
@@ -180,11 +180,12 @@ app.get('/api/my', h(async (req) => {
   return {
     week_start: ws,
     week_end: weekEnd(ws),
+    payday: payday(ws),
     current_week_start: weekStart(localToday()),
     shifts,
     total_minutes: shifts.reduce((t, s) => t + s.minutes, 0),
     paid: thisWeek ? thisWeek.paid : null,
-    weeks: weeks.map((w) => ({ ...w, week_end: weekEnd(w.week_start) })),
+    weeks: weeks.map((w) => ({ ...w, week_end: weekEnd(w.week_start), payday: payday(w.week_start) })),
   };
 }));
 
@@ -397,7 +398,43 @@ app.get('/api/dashboard', h(async (req) => {
     };
   });
   const total = (k) => perStaff.reduce((t, s) => t + s[k], 0);
+
+  // Payday view: the week paid on the next payday, the payday before it, and
+  // anything still unpaid whose payday has already passed.
+  const today = localToday();
+  const dueWs = dueWeek(today);
+  const lastWs = addDays(dueWs, -7);
+  const weekRows = (ws) => weeks.filter((w) => w.week_start === ws).map((w) => ({
+    staff_id: w.staff_id, name: w.name, week_start: w.week_start, minutes: w.minutes,
+    amount_pence: w.paid ? w.paid_pence : w.amount_pence, paid: w.paid, paid_on: w.paid_on,
+  }));
+  const summarise = (ws) => {
+    const rows = weekRows(ws);
+    const sum = (arr, k) => arr.reduce((t, r) => t + r[k], 0);
+    return {
+      week_start: ws, week_end: weekEnd(ws), payday: payday(ws),
+      minutes: sum(rows, 'minutes'), amount_pence: sum(rows, 'amount_pence'),
+      paid_pence: sum(rows.filter((r) => r.paid), 'amount_pence'),
+      unpaid_pence: sum(rows.filter((r) => !r.paid), 'amount_pence'),
+      staff: rows,
+    };
+  };
+  const due = { ...summarise(dueWs), is_today: payday(dueWs) === today };
+  const overdue = weeks
+    .filter((w) => !w.paid && w.payday < today && w.week_start !== dueWs)
+    .map((w) => ({ staff_id: w.staff_id, name: w.name, week_start: w.week_start, week_end: w.week_end, payday: w.payday, minutes: w.minutes, amount_pence: w.amount_pence }));
+  const unpaidWeeks = weeks.filter((w) => !w.paid);
+  const sumAmt = (arr) => arr.reduce((t, w) => t + w.amount_pence, 0);
+
   return {
+    today,
+    due,
+    last_payday: summarise(lastWs),
+    overdue,
+    owed: {
+      due_now_pence: sumAmt(unpaidWeeks.filter((w) => w.payday <= today)),
+      upcoming_pence: sumAmt(unpaidWeeks.filter((w) => w.payday > today)),
+    },
     week_start: thisWeek,
     week_end: weekEnd(thisWeek),
     current_week_start: currentWeek,

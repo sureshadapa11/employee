@@ -297,8 +297,10 @@ async function loadDashboard() {
   $('#dash-hours').textContent = hours(t.this_week_minutes);
   $('#dash-pay').textContent = money(t.this_week_pence);
   $('#dash-owed').textContent = money(t.unpaid_pence);
-  const unpaidWeeks = d.staff.reduce((n, s) => n + s.unpaid_weeks, 0);
-  $('#dash-owed-sub').textContent = unpaidWeeks ? `${unpaidWeeks} unpaid week${unpaidWeeks > 1 ? 's' : ''}` : 'All paid up';
+  $('#dash-owed-sub').textContent = t.unpaid_pence
+    ? `${money(d.owed.due_now_pence)} due now · ${money(d.owed.upcoming_pence)} coming up`
+    : 'All paid up';
+  renderPayday(d);
   $('#dash-paid').textContent = money(t.paid_pence);
   $('#dash-hours-all').textContent = `${hours(t.total_minutes)} in total`;
 
@@ -318,6 +320,71 @@ async function loadDashboard() {
     </button>`).join('')
     : emptyState('users', 'No staff yet.<br><button class="btn primary sm" data-goto="staff" style="margin-top:8px">Add staff</button>');
 }
+
+// Pay-due card, last payday and overdue weeks. These always follow today's date,
+// not the week picked with the arrows above.
+let dashData = null;
+function renderPayday(d) {
+  dashData = d;
+  const due = d.due;
+  const when = due.is_today ? `<span class="badge today">Today</span>` : '';
+  const rows = due.staff.map((r, i) => `
+    <div class="due-row">
+      <span class="item-main">
+        <span class="item-title">${esc(r.name)}</span>
+        <span class="item-sub">${hours(r.minutes)}</span>
+      </span>
+      <span class="amt">${money(r.amount_pence)}</span>
+      ${r.paid ? statusBadge(true) : `<button class="btn sm" data-pay-due="${i}">Mark paid</button>`}
+    </div>`).join('');
+  $('#due-card').innerHTML = `
+    <div class="due">
+      <div class="due-head">
+        <div>
+          <div class="due-kicker">Pay due</div>
+          <div class="due-payday">${fmtDate(due.payday)} ${when}</div>
+          <div class="due-week">For week ${weekLabel(due.week_start)}</div>
+        </div>
+      </div>
+      ${due.staff.length ? `
+        <div class="due-totals">
+          <div><div class="hero-label">Hours</div><div class="hero-value">${hours(due.minutes)}</div></div>
+          <div><div class="hero-label">${due.unpaid_pence ? 'To pay' : 'Paid'}</div><div class="hero-value">${money(due.unpaid_pence || due.amount_pence)}</div></div>
+        </div>
+        <div class="due-rows">${rows}</div>` : '<div class="due-empty">No hours recorded for that week.</div>'}
+    </div>`;
+
+  const last = d.last_payday;
+  const paidCount = last.staff.filter((r) => r.paid).length;
+  $('#last-payday').innerHTML = last.staff.length ? `
+    <div class="card last-payday">
+      <div class="row"><span class="muted">Last payday · ${fmtDate(last.payday)}</span><span class="big">${money(last.paid_pence)}</span></div>
+      <div class="row"><span class="item-sub">Week ${weekLabel(last.week_start)}</span>
+        <span class="item-sub">${paidCount} of ${last.staff.length} paid</span></div>
+      ${last.unpaid_pence ? `<div class="item-sub" style="color:var(--unpaid)">${money(last.unpaid_pence)} not paid yet, see Overdue</div>` : ''}
+    </div>` : '';
+
+  $('#overdue-block').classList.toggle('hidden', !d.overdue.length);
+  $('#overdue-list').innerHTML = d.overdue.map((w, i) => `
+    <div class="item overdue">
+      <span class="avatar">${esc(initials(w.name))}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(w.name)} · ${money(w.amount_pence)}</span>
+        <span class="item-sub">Week ${weekLabel(w.week_start)} · ${hours(w.minutes)}</span>
+        <span class="item-sub">Was due ${fmtDate(w.payday)}</span>
+      </span>
+      <button class="btn success sm" data-pay-overdue="${i}">${icon('check')} Pay</button>
+    </div>`).join('');
+}
+
+$('#due-card').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pay-due]');
+  if (b) openPaySheet(dashData.due.staff[b.dataset.payDue], loadDashboard);
+});
+$('#overdue-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pay-overdue]');
+  if (b) openPaySheet(dashData.overdue[b.dataset.payOverdue], loadDashboard);
+});
 
 $('#dash-switch').addEventListener('click', (e) => {
   const b = e.target.closest('[data-step]');
@@ -589,7 +656,7 @@ function renderWeeks() {
           ${statusBadge(w.paid)}
         </span>
       </div>
-      <div class="item-sub">${hours(w.minutes)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}${w.paid ? ` · paid ${fmtDate(w.paid_on)}${w.method ? ' by ' + esc(w.method.toLowerCase()) : ''}` : ''}</div>
+      <div class="item-sub">${hours(w.minutes)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}${!w.paid ? ` · payday ${fmtDate(w.payday)}${w.payday < today() ? ' (overdue)' : ''}` : ''}${w.paid ? ` · paid ${fmtDate(w.paid_on)}${w.method ? ' by ' + esc(w.method.toLowerCase()) : ''}` : ''}</div>
       <div class="details hidden" id="detail-${i}"></div>
       <div class="card-actions" ${w.paid ? 'style="grid-template-columns:1fr"' : ''}>
         <button class="btn ghost sm" data-detail="${i}">${icon('list')} Shifts</button>
@@ -624,7 +691,7 @@ $('#weeks-list').addEventListener('click', async (e) => {
   if (pay) openPaySheet(weeksData[pay.dataset.pay]);
 });
 
-function openPaySheet(w) {
+function openPaySheet(w, onDone = loadWeeks) {
   const body = openSheet(`
     <form class="sheet-form" id="pay-form" novalidate>
       <h3>Mark week as paid</h3>
@@ -666,7 +733,7 @@ function openPaySheet(w) {
       await api('/payments', { method: 'POST', body: { ...formData(e.target), method, staff_id: w.staff_id, week_start: w.week_start } });
       closeSheet();
       toast(`${money(w.amount_pence)} paid to ${w.name}`);
-      await loadWeeks();
+      await onDone();
     } catch (err) { $('#pay-error').textContent = err.message; }
   });
 }
@@ -679,9 +746,10 @@ async function loadPayments() {
   const paidTotal = payments.reduce((t, p) => t + p.amount_pence, 0);
   const unpaid = weeks.filter((w) => !w.paid);
   const owed = unpaid.reduce((t, w) => t + w.amount_pence, 0);
+  const dueNow = unpaid.filter((w) => w.payday <= today()).reduce((t, w) => t + w.amount_pence, 0);
   $('#payments-stats').innerHTML = `
     <div class="stat"><span class="stat-label"><span class="dot paid"></span>Total paid</span><span class="stat-value">${money(paidTotal)}</span><span class="stat-sub">${payments.length} payment${payments.length === 1 ? '' : 's'}</span></div>
-    <button class="stat" id="pay-owed"><span class="stat-label"><span class="dot unpaid"></span>Still owed</span><span class="stat-value">${money(owed)}</span><span class="stat-sub">${unpaid.length} unpaid week${unpaid.length === 1 ? '' : 's'}</span></button>`;
+    <button class="stat" id="pay-owed"><span class="stat-label"><span class="dot unpaid"></span>Still owed</span><span class="stat-value">${money(owed)}</span><span class="stat-sub">${money(dueNow)} due now · ${money(owed - dueNow)} coming up</span></button>`;
   $('#payments-list').innerHTML = payments.length ? payments.map((p) => `
     <div class="item">
       <span class="avatar">${esc(initials(p.name))}</span>
@@ -722,6 +790,7 @@ async function loadMy() {
   $('#my-title').textContent = name;
   $('#my-week').textContent = weekLabel(d.week_start);
   $('#my-hours').textContent = hours(d.total_minutes);
+  $('#my-payday').textContent = `Payday ${fmtDate(d.payday)}`;
   $('#my-status').innerHTML = d.paid === null ? '' : statusBadge(d.paid).replace('class="badge', 'class="badge lg');
   $('#my-shifts').innerHTML = d.shifts.length ? d.shifts.map((s) => {
     const dt = utc(s.shift_date);
@@ -739,6 +808,7 @@ async function loadMy() {
       <span class="item-main">
         <span class="item-title">${weekName(w.week_start)}</span>
         <span class="item-sub">${weekLabel(w.week_start)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}</span>
+        <span class="item-sub">Payday ${fmtDate(w.payday)}</span>
       </span>
       <span class="item-end">
         <span class="item-amount">${hours(w.minutes)}</span>

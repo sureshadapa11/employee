@@ -65,6 +65,14 @@
           </div>
         </div>
 
+        <!-- Payday: the week paid on the next payday, the last payday, and overdue weeks -->
+        <div id="due-card"></div>
+        <div id="last-payday"></div>
+        <div id="overdue-block" class="hidden">
+          <h2 class="section-title">Overdue</h2>
+          <div class="list" id="overdue-list"></div>
+        </div>
+
         <div class="stat-row">
           <button class="stat" data-goto="weeks" data-filter="unpaid">
             <span class="stat-label"><span class="dot unpaid"></span>Owed</span>
@@ -203,6 +211,7 @@
           <div>
             <div class="hero-label">Hours worked</div>
             <div class="hero-value" id="my-hours">0h 00m</div>
+            <div class="hero-label" id="my-payday"></div>
           </div>
           <div id="my-status"></div>
         </div>

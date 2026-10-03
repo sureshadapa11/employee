@@ -374,3 +374,37 @@ body.role-staff #open-settings { display: none; }
 .hero.single { grid-template-columns: 1fr auto; }
 .badge.lg { font-size: 14px; padding: 6px 12px; }
 .badge.lg svg.icon { width: 16px; height: 16px; }
+
+/* ---------- Payday cards ---------- */
+/* The current week becomes a soft card so the pay-due card is the main blue one. */
+section[data-view="home"] > .hero:not(.due) { background: var(--primary-soft); color: var(--text); }
+section[data-view="home"] > .hero:not(.due) .hero-label { color: var(--muted); }
+section[data-view="home"] > .hero:not(.due) .hero-divider { background: var(--border); }
+
+.due {
+  background: var(--hero-bg); color: var(--hero-ink); border-radius: 20px; padding: 18px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.due-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.due-kicker { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--hero-muted); }
+.due-payday { font-size: 20px; font-weight: 700; }
+.due-week { font-size: 14px; color: var(--hero-muted); }
+.due-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.due-totals .hero-label { color: var(--hero-muted); }
+.due-rows { display: flex; flex-direction: column; gap: 8px; }
+.due-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px;
+  background: color-mix(in srgb, var(--hero-ink) 10%, transparent);
+}
+.due-row .item-main { min-width: 0; }
+.due-row .item-sub { color: var(--hero-muted); }
+.due-row .amt { font-weight: 700; white-space: nowrap; }
+.due-row .btn { background: var(--hero-ink); color: var(--hero-bg); min-height: 40px; }
+.due-row .badge.paid { background: color-mix(in srgb, var(--hero-ink) 90%, transparent); }
+.due-empty { color: var(--hero-muted); font-size: 14px; }
+.badge.today { background: #FDE68A; color: #78350F; }
+
+.last-payday { display: flex; flex-direction: column; gap: 4px; }
+.last-payday .row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.last-payday .big { font-size: 20px; font-weight: 700; }
+.item.overdue { border-left: 4px solid var(--unpaid); }

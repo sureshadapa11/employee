@@ -40,3 +40,18 @@ test('date validation', () => {
   assert.ok(!isValidDate('2026-02-30'));
   assert.ok(!isValidDate('03/10/2026'));
 });
+
+test('payday is two weeks after the week starts', () => {
+  const { payday } = require('../lib/time');
+  assert.strictEqual(payday('2026-09-30'), '2026-10-14'); // Wed 30 Sep – Tue 6 Oct → Wed 14 Oct
+});
+
+test('due week moves on the day after payday', () => {
+  const { dueWeek } = require('../lib/time');
+  assert.strictEqual(dueWeek('2026-10-04'), '2026-09-23'); // Sun → paid Wed 7 Oct
+  assert.strictEqual(dueWeek('2026-10-07'), '2026-09-23'); // payday itself
+  assert.strictEqual(dueWeek('2026-10-08'), '2026-09-30'); // next day → paid Wed 14 Oct
+  assert.strictEqual(dueWeek('2026-10-13'), '2026-09-30');
+  assert.strictEqual(dueWeek('2026-10-14'), '2026-09-30');
+  assert.strictEqual(dueWeek('2026-10-15'), '2026-10-07');
+});
