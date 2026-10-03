@@ -91,6 +91,28 @@ async function getStaff(id) {
 
 const weekPayment = (staffId, ws) => one('SELECT * FROM payments WHERE staff_id = $1 AND week_start = $2', [staffId, ws]);
 
+// A shift as an absolute time range in minutes, so overnight shifts compare correctly.
+function shiftRange(date, start, end) {
+  const from = Date.parse(date + 'T00:00:00Z') / 60000 + parseTime(start);
+  let span = parseTime(end) - parseTime(start);
+  if (span <= 0) span += 1440;
+  return [from, from + span];
+}
+
+// Refuse a shift that overlaps another shift for the same person (this also stops duplicates).
+async function assertNoOverlap(staffId, v, ignoreId = 0) {
+  const nearby = await query(
+    'SELECT id, shift_date, start_time, end_time FROM shifts WHERE staff_id = $1 AND shift_date BETWEEN $2 AND $3 AND id <> $4',
+    [staffId, addDays(v.shift_date, -1), addDays(v.shift_date, 1), ignoreId],
+  );
+  const [a1, a2] = shiftRange(v.shift_date, v.start_time, v.end_time);
+  const clash = nearby.find((o) => {
+    const [b1, b2] = shiftRange(o.shift_date, o.start_time, o.end_time);
+    return a1 < b2 && b1 < a2;
+  });
+  if (clash) throw bad(`This overlaps a shift already entered: ${clash.shift_date} ${clash.start_time}–${clash.end_time}`);
+}
+
 async function assertWeekUnpaid(staffId, ws) {
   if (await weekPayment(staffId, ws)) {
     throw bad(`Week starting ${ws} is already paid. Undo the payment first to change its hours.`);
@@ -224,6 +246,7 @@ app.post('/api/shifts', h(async (req) => {
   }
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(staff.id, ws);
+  await assertNoOverlap(staff.id, v);
   return forViewer(req, await one(`
     INSERT INTO shifts (staff_id, shift_date, start_time, end_time, break_minutes, minutes, rate_pence, week_start, note, created_by)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
@@ -239,6 +262,7 @@ app.put('/api/shifts/:id', h(async (req) => {
   const v = validateShift(req.body);
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(old.staff_id, ws);
+  await assertNoOverlap(old.staff_id, v, old.id);
   return forViewer(req, await one(`
     UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7,
       staff_note = NULL, staff_note_at = NULL
