@@ -456,15 +456,109 @@ $('.stepper').addEventListener('click', (e) => {
   if (b) setBreak(Number(shiftForm.elements.break_minutes.value) + Number(b.dataset.break));
 });
 
-// Auto-insert the colon so "2200" becomes "22:00"; jump to "To" once "From" is complete.
-$$('input.time').forEach((inp) => {
-  inp.addEventListener('input', () => {
-    const digits = inp.value.replace(/\D/g, '').slice(0, 4);
-    inp.value = digits.length > 2 ? digits.slice(0, 2) + ':' + digits.slice(2) : digits;
-    if (inp.name === 'start_time' && digits.length === 4 && parseTime(inp.value) !== null) shiftForm.elements.end_time.focus();
+// ---- Time picker: tap From/To, pick an hour then minutes ----
+const pad2 = (n) => String(n).padStart(2, '0');
+const MINUTE_STEPS = Array.from({ length: 12 }, (_, i) => i * 5);
+
+function openTimePicker(inp) {
+  const isFrom = inp.name === 'start_time';
+  const cur = parseTime(inp.value);
+  let hh = cur === null ? null : Math.floor(cur / 60);
+  let mm = cur === null ? null : cur % 60;
+  const body = openSheet(`
+    <div class="sheet-form">
+      <h3>${isFrom ? 'From' : 'To'}</h3>
+      <div class="tp-display" id="tp-display"></div>
+      <div class="tp-label">Hour</div>
+      <div class="tp-grid" id="tp-hours">${Array.from({ length: 24 }, (_, h) => `<button type="button" data-h="${h}">${pad2(h)}</button>`).join('')}</div>
+      <div class="tp-label">Minutes</div>
+      <div class="tp-grid" id="tp-mins">${MINUTE_STEPS.map((m) => `<button type="button" data-m="${m}">:${pad2(m)}</button>`).join('')}</div>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="tp-cancel">Cancel</button>
+        <button type="button" class="btn primary" id="tp-done">Done</button>
+      </div>
+    </div>`);
+  inp.classList.add('picking');
+  sheet.addEventListener('close', () => inp.classList.remove('picking'), { once: true });
+
+  const render = () => {
+    $('#tp-display', body).innerHTML = `<span class="${hh === null ? 'dim' : ''}">${hh === null ? '--' : pad2(hh)}</span>:<span class="${mm === null ? 'dim' : ''}">${mm === null ? '--' : pad2(mm)}</span>`;
+    $$('#tp-hours button', body).forEach((b) => b.classList.toggle('sel', Number(b.dataset.h) === hh));
+    $$('#tp-mins button', body).forEach((b) => b.classList.toggle('sel', Number(b.dataset.m) === mm));
+  };
+  const commit = () => {
+    if (hh === null) { closeSheet(); return; }
+    inp.value = `${pad2(hh)}:${pad2(mm ?? 0)}`;
+    closeSheet();
     updatePreview();
+    // After picking From, go straight on to To if it's still empty.
+    if (isFrom && !shiftForm.elements.end_time.value) setTimeout(() => openTimePicker(shiftForm.elements.end_time), 150);
+  };
+
+  $('#tp-hours', body).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-h]');
+    if (!b) return;
+    hh = Number(b.dataset.h);
+    if (mm === null) mm = 0;
+    render();
   });
-  inp.addEventListener('focus', () => inp.select());
+  $('#tp-mins', body).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-m]');
+    if (!b) return;
+    mm = Number(b.dataset.m);
+    render();
+    if (hh !== null) commit();
+  });
+  $('#tp-cancel', body).addEventListener('click', closeSheet);
+  $('#tp-done', body).addEventListener('click', commit);
+  render();
+}
+
+$$('input.time').forEach((inp) => {
+  inp.addEventListener('click', () => openTimePicker(inp));
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTimePicker(inp); }
+  });
+});
+
+// ---- Quick picks: recent From–To pairs, remembered on this device ----
+const PRESETS_KEY = 'recentShiftTimes';
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY)) || []; } catch { return []; }
+}
+function savePresets(list) {
+  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(list.slice(0, 4))); } catch { /* storage unavailable */ }
+}
+function rememberPreset(startTime, endTime) {
+  const p = `${startTime}-${endTime}`;
+  savePresets([p, ...loadPresets().filter((x) => x !== p)]);
+}
+// Fill empty slots from shifts already on screen, so quick picks appear on a new phone too.
+function seedPresets(shifts) {
+  const list = loadPresets();
+  for (const sh of shifts) {
+    const p = `${sh.start_time}-${sh.end_time}`;
+    if (list.length >= 4) break;
+    if (!list.includes(p)) list.push(p);
+  }
+  savePresets(list);
+}
+function renderPresets() {
+  const list = loadPresets();
+  const el = $('#time-presets');
+  el.classList.toggle('hidden', !list.length);
+  el.innerHTML = list.map((p) => {
+    const [a, b] = p.split('-');
+    return `<button type="button" class="chip" data-preset="${p}">${b <= a ? icon('moon') : ''}${a}–${b}</button>`;
+  }).join('');
+}
+$('#time-presets').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-preset]');
+  if (!c) return;
+  const [a, b] = c.dataset.preset.split('-');
+  shiftForm.elements.start_time.value = a;
+  shiftForm.elements.end_time.value = b;
+  updatePreview();
 });
 
 function updatePreview() {
@@ -474,13 +568,7 @@ function updatePreview() {
   const out = $('#shift-preview');
   out.classList.remove('warn');
   if (s === null || en === null) {
-    const bad = (f.start_time.value.length === 5 && s === null) || (f.end_time.value.length === 5 && en === null);
-    if (bad) {
-      out.classList.add('warn');
-      out.innerHTML = `<div class="preview-main">${icon('alert')} Use 24-hour time, 00:00 to 23:59</div>`;
-    } else {
-      out.innerHTML = '<div class="preview-main">--</div><div class="preview-sub">Enter start and end times</div>';
-    }
+    out.innerHTML = '<div class="preview-main">--</div><div class="preview-sub">Tap From and To to pick times</div>';
     return;
   }
   let mins = en - s;
@@ -502,6 +590,7 @@ function updatePreview() {
 
 async function loadAdd() {
   if (!shiftForm.elements.shift_date.value) setDate(today());
+  renderPresets();
   renderStaffChips();
   setBreak(Number(shiftForm.elements.break_minutes.value) || 0);
   await loadHoursList();
@@ -516,6 +605,8 @@ async function loadHoursList() {
     ? await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`)
     : (await api(`/my?week=${hoursWeek}`)).shifts;
   shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
+  seedPresets(shifts);
+  renderPresets();
   const total = shifts.reduce((t, s) => t + s.minutes, 0);
   const pay = shifts.reduce((t, s) => t + shiftPay(s), 0);
   const paid = shifts.some((s) => s.paid);
@@ -580,6 +671,7 @@ shiftForm.addEventListener('submit', async (e) => {
     const editing = !!data.edit_id;
     if (editing) await api('/shifts/' + data.edit_id, { method: 'PUT', body: data });
     else await api('/shifts', { method: 'POST', body: data });
+    rememberPreset(data.start_time, data.end_time);
     hoursWeek = weekStart(data.shift_date);
     resetShiftForm();
     toast(editing ? 'Shift updated' : 'Shift saved');

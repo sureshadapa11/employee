@@ -112,18 +112,19 @@
           </div>
 
           <div class="group">
+            <div class="chips presets hidden" id="time-presets" aria-label="Recent shift times"></div>
             <div class="time-row">
               <label class="field time-field">
                 <span>From</span>
-                <input name="start_time" class="input time" placeholder="09:00" inputmode="numeric" maxlength="5" autocomplete="off" required>
+                <input name="start_time" class="input time" placeholder="--:--" readonly autocomplete="off" required>
               </label>
               <span class="time-arrow" aria-hidden="true"><i data-icon="arrowRight"></i></span>
               <label class="field time-field">
                 <span>To</span>
-                <input name="end_time" class="input time" placeholder="17:00" inputmode="numeric" maxlength="5" autocomplete="off" required>
+                <input name="end_time" class="input time" placeholder="--:--" readonly autocomplete="off" required>
               </label>
             </div>
-            <p class="hint">24-hour time. Type 2200 for 22:00. If “To” is earlier than “From”, the shift ends the next day.</p>
+            <p class="hint">Tap a time to pick it (24-hour). If “To” is earlier than “From”, the shift ends the next day.</p>
           </div>
 
           <div class="group">
