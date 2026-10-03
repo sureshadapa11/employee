@@ -2,155 +2,224 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Staff Hours</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F3F5F9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B1120" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Hours</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- Login -->
   <section id="login-view" class="login hidden">
-    <form id="login-form" class="card login-card">
-      <h1>Staff Hours</h1>
-      <label>Username <input name="username" autocomplete="username" required></label>
-      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-      <p class="error" id="login-error"></p>
-      <button class="btn primary" type="submit">Log in</button>
+    <form id="login-form" class="login-card" autocomplete="on">
+      <div class="login-icon"><i data-icon="clock"></i></div>
+      <h1>Sign in</h1>
+      <label class="field">
+        <span>Username</span>
+        <input name="username" autocomplete="username" autocapitalize="none" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <p class="error" id="login-error" role="alert"></p>
+      <button class="btn primary block" type="submit">Sign in</button>
     </form>
   </section>
 
   <!-- App -->
   <div id="app-view" class="hidden">
-    <header class="topbar">
-      <strong class="brand">Staff Hours</strong>
-      <nav id="nav">
-        <button data-view="dashboard" class="active">Dashboard</button>
-        <button data-view="hours">Add Hours</button>
-        <button data-view="weeks">Weeks</button>
-        <button data-view="payments">Payments</button>
-        <button data-view="staff">Staff</button>
-        <button data-view="settings">Settings</button>
-      </nav>
-      <button id="logout" class="btn ghost small">Log out</button>
+    <header class="appbar">
+      <h1 id="view-title">This week</h1>
+      <button class="icon-btn" id="open-settings" aria-label="Settings"><i data-icon="settings"></i></button>
     </header>
 
     <main>
-      <!-- Dashboard -->
-      <section data-view="dashboard">
-        <div class="week-bar">
-          <button class="btn arrow" id="dash-prev" aria-label="Previous week">&#8249;</button>
-          <div class="week-title">
-            <h2 id="dash-title">This week</h2>
-            <div class="muted" id="dash-week"></div>
-          </div>
-          <button class="btn arrow" id="dash-next" aria-label="Next week">&#8250;</button>
-          <button class="btn ghost small hidden" id="dash-today">Back to this week</button>
+      <!-- Home -->
+      <section data-view="home">
+        <div class="week-switch" id="dash-switch">
+          <button class="icon-btn" data-step="-1" aria-label="Previous week"><i data-icon="chevronLeft"></i></button>
+          <button class="week-switch-label" data-step="0" aria-label="Go to this week">
+            <strong id="dash-title">This week</strong>
+            <span id="dash-week"></span>
+          </button>
+          <button class="icon-btn" data-step="1" aria-label="Next week"><i data-icon="chevronRight"></i></button>
         </div>
-        <div class="stats" id="dash-stats"></div>
-        <h3>By staff</h3>
-        <div class="table-wrap"><table id="dash-table"></table></div>
+
+        <div class="hero">
+          <div>
+            <div class="hero-label">Hours</div>
+            <div class="hero-value" id="dash-hours">0h 00m</div>
+          </div>
+          <div class="hero-divider"></div>
+          <div>
+            <div class="hero-label">Pay</div>
+            <div class="hero-value" id="dash-pay">£0.00</div>
+          </div>
+        </div>
+
+        <div class="stat-row">
+          <button class="stat" data-goto="weeks" data-filter="unpaid">
+            <span class="stat-label"><span class="dot unpaid"></span>Owed</span>
+            <span class="stat-value" id="dash-owed">£0.00</span>
+            <span class="stat-sub" id="dash-owed-sub"></span>
+          </button>
+          <button class="stat" data-goto="payments">
+            <span class="stat-label"><span class="dot paid"></span>Paid to date</span>
+            <span class="stat-value" id="dash-paid">£0.00</span>
+            <span class="stat-sub" id="dash-hours-all"></span>
+          </button>
+        </div>
+
+        <h2 class="section-title">Staff this week</h2>
+        <div class="list" id="dash-staff"></div>
       </section>
 
       <!-- Add hours -->
-      <section data-view="hours" class="hidden">
-        <h2>Add hours</h2>
-        <form id="shift-form" class="card form-grid">
-          <input type="hidden" name="id">
-          <label>Staff <select name="staff_id" required></select></label>
-          <label>Date (shift start) <input name="shift_date" type="date" required></label>
-          <label>From (24h) <input name="start_time" class="time" placeholder="22:00" inputmode="numeric" maxlength="5" required></label>
-          <label>To (24h) <input name="end_time" class="time" placeholder="06:00" inputmode="numeric" maxlength="5" required></label>
-          <label>Break (minutes) <input name="break_minutes" type="number" min="0" step="5" value="0"></label>
-          <label class="wide">Note <input name="note" placeholder="optional"></label>
-          <p class="preview wide" id="shift-preview"></p>
-          <p class="error wide" id="shift-error"></p>
-          <div class="wide actions">
-            <button class="btn primary" type="submit" id="shift-submit">Save shift</button>
-            <button class="btn ghost hidden" type="button" id="shift-cancel">Cancel edit</button>
+      <section data-view="add" class="hidden">
+        <form id="shift-form" novalidate>
+          <input type="hidden" name="edit_id">
+
+          <div class="group">
+            <div class="group-label">Staff</div>
+            <div class="chips" id="staff-chips" role="radiogroup" aria-label="Staff"></div>
+          </div>
+
+          <div class="group">
+            <div class="group-label">Shift start date</div>
+            <div class="date-row">
+              <div class="segmented small" id="date-quick">
+                <button type="button" data-days="-1">Yesterday</button>
+                <button type="button" data-days="0">Today</button>
+              </div>
+              <input name="shift_date" type="date" class="input" required aria-label="Shift start date">
+            </div>
+          </div>
+
+          <div class="group">
+            <div class="time-row">
+              <label class="field time-field">
+                <span>From</span>
+                <input name="start_time" class="input time" placeholder="09:00" inputmode="numeric" maxlength="5" autocomplete="off" required>
+              </label>
+              <span class="time-arrow" aria-hidden="true"><i data-icon="arrowRight"></i></span>
+              <label class="field time-field">
+                <span>To</span>
+                <input name="end_time" class="input time" placeholder="17:00" inputmode="numeric" maxlength="5" autocomplete="off" required>
+              </label>
+            </div>
+            <p class="hint">24-hour time. Type 2200 for 22:00. If “To” is earlier than “From”, the shift ends the next day.</p>
+          </div>
+
+          <div class="group">
+            <div class="group-label">Unpaid break</div>
+            <div class="stepper">
+              <button type="button" class="icon-btn" data-break="-15" aria-label="Less break"><i data-icon="minus"></i></button>
+              <output id="break-out">0 min</output>
+              <button type="button" class="icon-btn" data-break="15" aria-label="More break"><i data-icon="plus"></i></button>
+              <input type="hidden" name="break_minutes" value="0">
+            </div>
+          </div>
+
+          <div class="group">
+            <label class="field">
+              <span>Note <em>(optional)</em></span>
+              <input name="note" class="input" maxlength="200">
+            </label>
+          </div>
+
+          <div class="preview" id="shift-preview" aria-live="polite">
+            <div class="preview-main">--</div>
+            <div class="preview-sub">Enter start and end times</div>
+          </div>
+
+          <p class="error" id="shift-error" role="alert"></p>
+          <div class="form-actions">
+            <button class="btn ghost hidden" type="button" id="shift-cancel">Cancel</button>
+            <button class="btn primary block" type="submit" id="shift-submit">Save shift</button>
           </div>
         </form>
-        <h3>Shifts in week <span class="muted" id="hours-week"></span></h3>
-        <div class="week-nav">
-          <button class="btn ghost small" id="hours-prev">&larr; Prev week</button>
-          <button class="btn ghost small" id="hours-next">Next week &rarr;</button>
+
+        <div class="week-switch compact" id="hours-switch">
+          <button class="icon-btn" data-step="-1" aria-label="Previous week"><i data-icon="chevronLeft"></i></button>
+          <div class="week-switch-label static">
+            <strong id="hours-title">Shifts this week</strong>
+            <span id="hours-week"></span>
+          </div>
+          <button class="icon-btn" data-step="1" aria-label="Next week"><i data-icon="chevronRight"></i></button>
         </div>
-        <div class="table-wrap"><table id="hours-table"></table></div>
+        <div id="hours-summary"></div>
+        <div class="list" id="hours-list"></div>
       </section>
 
       <!-- Weeks -->
       <section data-view="weeks" class="hidden">
-        <h2>Weekly totals</h2>
-        <div class="filters">
-          <label>Staff <select id="weeks-staff"></select></label>
-          <label>Show <select id="weeks-status">
-            <option value="">All</option>
-            <option value="unpaid">Unpaid</option>
-            <option value="paid">Paid</option>
-          </select></label>
+        <div class="toolbar">
+          <div class="segmented" id="weeks-status" role="tablist">
+            <button type="button" data-status="unpaid" class="active">Unpaid</button>
+            <button type="button" data-status="paid">Paid</button>
+            <button type="button" data-status="">All</button>
+          </div>
+          <select id="weeks-staff" class="input select" aria-label="Filter by staff"></select>
         </div>
-        <div class="table-wrap"><table id="weeks-table"></table></div>
+        <div id="weeks-total"></div>
+        <div class="list" id="weeks-list"></div>
       </section>
 
       <!-- Payments -->
       <section data-view="payments" class="hidden">
-        <h2>Payment history</h2>
-        <div class="filters">
-          <label>Staff <select id="payments-staff"></select></label>
+        <div class="toolbar">
+          <select id="payments-staff" class="input select" aria-label="Filter by staff"></select>
         </div>
-        <div class="stats" id="payments-stats"></div>
-        <div class="table-wrap"><table id="payments-table"></table></div>
+        <div class="stat-row" id="payments-stats"></div>
+        <h2 class="section-title">History</h2>
+        <div class="list" id="payments-list"></div>
       </section>
 
       <!-- Staff -->
       <section data-view="staff" class="hidden">
-        <h2>Staff</h2>
-        <form id="staff-form" class="card form-grid">
-          <input type="hidden" name="id">
-          <label>Name <input name="name" required></label>
-          <label>Phone <input name="phone"></label>
-          <label>Hourly rate <input name="rate" type="number" min="0" step="0.01" required></label>
-          <p class="error wide" id="staff-error"></p>
-          <p class="muted wide small-text">Changing the rate only affects shifts added from now on.</p>
-          <div class="wide actions">
-            <button class="btn primary" type="submit" id="staff-submit">Add staff</button>
-            <button class="btn ghost hidden" type="button" id="staff-cancel">Cancel edit</button>
-          </div>
-        </form>
-        <div class="table-wrap"><table id="staff-table"></table></div>
+        <button class="btn primary block" id="add-staff"><i data-icon="plus"></i> Add staff</button>
+        <div class="list" id="staff-list"></div>
       </section>
 
       <!-- Settings -->
       <section data-view="settings" class="hidden">
-        <h2>Change password</h2>
-        <form id="pw-form" class="card form-grid">
-          <label>Current password <input name="current" type="password" required></label>
-          <label>New password <input name="next" type="password" minlength="6" required></label>
-          <p class="error wide" id="pw-msg"></p>
-          <div class="wide actions"><button class="btn primary" type="submit">Update password</button></div>
+        <h2 class="section-title">Change password</h2>
+        <form id="pw-form" class="card">
+          <label class="field"><span>Current password</span><input name="current" type="password" class="input" autocomplete="current-password" required></label>
+          <label class="field"><span>New password</span><input name="next" type="password" class="input" minlength="6" autocomplete="new-password" required></label>
+          <p class="error" id="pw-msg" role="alert"></p>
+          <button class="btn primary block" type="submit">Update password</button>
         </form>
+        <h2 class="section-title">Account</h2>
+        <div class="card">
+          <p class="muted" id="settings-info"></p>
+          <button class="btn danger-outline block" id="logout"><i data-icon="logout"></i> Sign out</button>
+        </div>
       </section>
     </main>
+
+    <nav class="tabbar" id="tabbar" aria-label="Main">
+      <button data-view="home" class="active"><i data-icon="home"></i><span>Home</span></button>
+      <button data-view="weeks"><i data-icon="calendar"></i><span>Weeks</span></button>
+      <button data-view="add" class="tab-add" aria-label="Add hours"><span class="tab-add-circle"><i data-icon="plus"></i></span><span>Add</span></button>
+      <button data-view="payments"><i data-icon="wallet"></i><span>Paid</span></button>
+      <button data-view="staff"><i data-icon="users"></i><span>Staff</span></button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </div>
 
-  <!-- Pay dialog -->
-  <dialog id="pay-dialog">
-    <form id="pay-form" method="dialog" class="form-grid">
-      <h3 class="wide">Mark week as paid</h3>
-      <p class="wide" id="pay-summary"></p>
-      <input type="hidden" name="staff_id">
-      <input type="hidden" name="week_start">
-      <label>Paid on <input name="paid_on" type="date" required></label>
-      <label>Method <select name="method">
-        <option>Cash</option>
-        <option>Bank transfer</option>
-        <option>Other</option>
-      </select></label>
-      <label class="wide">Note <input name="note" placeholder="optional"></label>
-      <p class="error wide" id="pay-error"></p>
-      <div class="wide actions">
-        <button class="btn primary" value="confirm" id="pay-confirm">Confirm payment</button>
-        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
-      </div>
-    </form>
+  <!-- Bottom sheet (content filled by JS) -->
+  <dialog class="sheet" id="sheet">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div id="sheet-body"></div>
   </dialog>
 
   <script src="app.js"></script>

@@ -4,36 +4,76 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let CURRENCY = '£';
+let WEEK_START_DAY = 3; // set from server
 let staffList = [];
 
-const money = (pence) => CURRENCY + ((pence || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Lucide-style line icons.
+const ICONS = {
+  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  wallet: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  arrowRight: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  trash: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+};
+const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+const hydrateIcons = (root = document) => $$('i[data-icon]', root).forEach((el) => { el.innerHTML = icon(el.dataset.icon); });
+
+const money = (pence) => CURRENCY + ((pence || 0) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const hours = (mins) => {
   mins = mins || 0;
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
 };
-const decimalHours = (mins) => ((mins || 0) / 60).toFixed(2);
 const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const utc = (iso) => new Date(iso + 'T00:00:00Z');
 const fmtDate = (iso) => {
   if (!iso) return '';
-  const d = new Date(iso + 'T00:00:00Z');
-  return `${DAYS[d.getUTCDay()]} ${String(d.getUTCDate()).padStart(2, '0')} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
+  const d = utc(iso);
+  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 };
 const addDays = (iso, n) => {
-  const d = new Date(iso + 'T00:00:00Z');
+  const d = utc(iso);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
-let WEEK_START_DAY = 3; // set from server
-const weekStart = (iso) => addDays(iso, -((new Date(iso + 'T00:00:00Z').getUTCDay() - WEEK_START_DAY + 7) % 7));
+const weekStart = (iso) => addDays(iso, -((utc(iso).getUTCDay() - WEEK_START_DAY + 7) % 7));
 const weekLabel = (ws) => `${fmtDate(ws)} – ${fmtDate(addDays(ws, 6))}`;
+const weekName = (ws) => {
+  const diff = Math.round((Date.parse(ws) - Date.parse(weekStart(today()))) / (7 * 864e5));
+  if (diff === 0) return 'This week';
+  if (diff === -1) return 'Last week';
+  if (diff === 1) return 'Next week';
+  return diff < 0 ? `${-diff} weeks ago` : `In ${diff} weeks`;
+};
 const parseTime = (t) => {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(t || '');
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
+const initials = (name) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+const shiftPay = (s) => Math.round(s.minutes * s.rate_pence / 60);
+const statusBadge = (paid) => paid
+  ? `<span class="badge paid">${icon('check')}Paid</span>`
+  : `<span class="badge unpaid">${icon('clock')}Unpaid</span>`;
+const emptyState = (ic, text) => `<div class="empty">${icon(ic)}<div>${text}</div></div>`;
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -49,19 +89,66 @@ async function api(path, opts = {}) {
 
 const formData = (form) => Object.fromEntries(new FormData(form).entries());
 
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// ---------- bottom sheet ----------
+const sheet = $('#sheet');
+function openSheet(html) {
+  const body = $('#sheet-body');
+  body.innerHTML = html;
+  hydrateIcons(body);
+  sheet.showModal();
+  return body;
+}
+const closeSheet = () => sheet.close();
+// Tapping the dimmed backdrop closes the sheet.
+sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
+
+function confirmSheet({ title, message, confirmText = 'Confirm', danger = false }) {
+  return new Promise((resolve) => {
+    const body = openSheet(`
+      <div class="sheet-form">
+        <h3>${esc(title)}</h3>
+        <p class="muted">${esc(message)}</p>
+        <div class="sheet-actions">
+          <button class="btn ghost" data-r="0">Cancel</button>
+          <button class="btn ${danger ? 'danger' : 'primary'}" data-r="1">${esc(confirmText)}</button>
+        </div>
+      </div>`);
+    let answered = false;
+    $$('[data-r]', body).forEach((b) => b.addEventListener('click', () => {
+      answered = true; closeSheet(); resolve(b.dataset.r === '1');
+    }));
+    sheet.addEventListener('close', () => { if (!answered) resolve(false); }, { once: true });
+  });
+}
+
 // ---------- auth ----------
 function showLogin() {
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
 }
 
+function applyMe(me) {
+  CURRENCY = me.currency;
+  WEEK_START_DAY = me.week_start_day;
+  $('#settings-info').textContent = `Signed in as ${me.username}. Weeks run ${DAY_NAMES[WEEK_START_DAY]} to ${DAY_NAMES[(WEEK_START_DAY + 6) % 7]}.`;
+}
+
 async function showApp() {
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
   hoursWeek = weekStart(today());
-  dashWeek = null;
+  dashWeek = weekStart(today());
   await loadStaff();
-  showView('dashboard');
+  route();
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
@@ -69,8 +156,7 @@ $('#login-form').addEventListener('submit', async (e) => {
   $('#login-error').textContent = '';
   try {
     await api('/login', { method: 'POST', body: formData(e.target) });
-    const me = await api('/me');
-    CURRENCY = me.currency; WEEK_START_DAY = me.week_start_day;
+    applyMe(await api('/me'));
     e.target.reset();
     showApp();
   } catch (err) { $('#login-error').textContent = err.message; }
@@ -78,275 +164,377 @@ $('#login-form').addEventListener('submit', async (e) => {
 
 $('#logout').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' }).catch(() => {});
+  history.replaceState(null, '', location.pathname);
   showLogin();
 });
 
-// ---------- navigation ----------
-const loaders = {
-  dashboard: loadDashboard,
-  hours: loadHours,
-  weeks: loadWeeks,
-  payments: loadPayments,
-  staff: renderStaff,
-  settings: () => {},
+// ---------- navigation (hash based, so the phone's back button works) ----------
+const VIEWS = {
+  home: { title: 'This week', load: () => loadDashboard() },
+  add: { title: 'Add hours', load: () => loadAdd() },
+  weeks: { title: 'Weeks', load: () => loadWeeks() },
+  payments: { title: 'Payments', load: () => loadPayments() },
+  staff: { title: 'Staff', load: () => renderStaff() },
+  settings: { title: 'Settings', load: () => {} },
 };
 
-function showView(name) {
-  $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
-  $$('main > section').forEach((s) => s.classList.toggle('hidden', s.dataset.view !== name));
-  loaders[name]();
+function go(view) {
+  if (location.hash === '#' + view) route();
+  else location.hash = view;
 }
-$('#nav').addEventListener('click', (e) => { if (e.target.dataset.view) showView(e.target.dataset.view); });
+
+function route() {
+  if ($('#app-view').classList.contains('hidden')) return;
+  if (sheet.open) closeSheet();
+  const name = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'home';
+  $$('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+  $$('main > section').forEach((s) => s.classList.toggle('hidden', s.dataset.view !== name));
+  $('#view-title').textContent = name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
+  window.scrollTo(0, 0);
+  VIEWS[name].load();
+}
+window.addEventListener('hashchange', route);
+$('#tabbar').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-view]');
+  if (b) go(b.dataset.view);
+});
+$('#open-settings').addEventListener('click', () => go('settings'));
 
 // ---------- staff ----------
 async function loadStaff() {
   staffList = await api('/staff');
-  const active = staffList.filter((s) => s.active);
-  const opts = (list) => list.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  const shiftSel = $('#shift-form [name=staff_id]');
-  const prev = shiftSel.value;
-  shiftSel.innerHTML = active.length ? opts(active) : '<option value="">Add staff first</option>';
-  if (prev && active.some((s) => String(s.id) === prev)) shiftSel.value = prev;
+  const opts = '<option value="">All staff</option>' + staffList.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   for (const id of ['#weeks-staff', '#payments-staff']) {
     const sel = $(id); const v = sel.value;
-    sel.innerHTML = '<option value="">All staff</option>' + opts(staffList);
+    sel.innerHTML = opts;
     sel.value = v;
   }
 }
 
 function renderStaff() {
-  const rows = staffList.map((s) => `
-    <tr>
-      <td>${esc(s.name)}</td>
-      <td>${esc(s.phone || '')}</td>
-      <td class="num">${money(s.rate_pence)}/h</td>
-      <td>${s.active ? '<span class="badge paid">Active</span>' : '<span class="badge unpaid">Inactive</span>'}</td>
-      <td class="num">
-        <button class="btn small" data-edit="${s.id}">Edit</button>
-        <button class="btn small ghost" data-toggle="${s.id}">${s.active ? 'Deactivate' : 'Activate'}</button>
-      </td>
-    </tr>`).join('');
-  $('#staff-table').innerHTML = `
-    <thead><tr><th>Name</th><th>Phone</th><th class="num">Rate</th><th>Status</th><th></th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="5" class="empty">No staff yet. Add your first staff member above.</td></tr>'}</tbody>`;
+  $('#staff-list').innerHTML = staffList.length ? staffList.map((s) => `
+    <button class="item" data-staff="${s.id}">
+      <span class="avatar ${s.active ? '' : 'off'}">${esc(initials(s.name))}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(s.name)}</span>
+        <span class="item-sub">${money(s.rate_pence)} per hour${s.phone ? ' · ' + esc(s.phone) : ''}</span>
+      </span>
+      <span class="item-end">
+        ${s.active ? '' : '<span class="badge neutral">Inactive</span>'}
+      </span>
+      ${icon('chevronRight')}
+    </button>`).join('') : emptyState('users', 'No staff yet. Add your first staff member.');
 }
 
-function resetStaffForm() {
-  const f = $('#staff-form');
-  f.reset(); f.id.value = '';
-  $('#staff-submit').textContent = 'Add staff';
-  $('#staff-cancel').classList.add('hidden');
-  $('#staff-error').textContent = '';
-}
-
-$('#staff-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const data = formData(e.target);
-  try {
-    if (data.id) await api('/staff/' + data.id, { method: 'PUT', body: data });
-    else await api('/staff', { method: 'POST', body: data });
-    resetStaffForm();
-    await loadStaff(); renderStaff();
-  } catch (err) { $('#staff-error').textContent = err.message; }
-});
-$('#staff-cancel').addEventListener('click', resetStaffForm);
-
-$('#staff-table').addEventListener('click', async (e) => {
-  const editId = e.target.dataset.edit;
-  const toggleId = e.target.dataset.toggle;
-  if (editId) {
-    const s = staffList.find((x) => String(x.id) === editId);
-    const f = $('#staff-form');
-    f.id.value = s.id; f.name.value = s.name; f.phone.value = s.phone || ''; f.rate.value = (s.rate_pence / 100).toFixed(2);
-    $('#staff-submit').textContent = 'Save changes';
-    $('#staff-cancel').classList.remove('hidden');
-    f.scrollIntoView({ behavior: 'smooth' });
-  }
-  if (toggleId) {
-    const s = staffList.find((x) => String(x.id) === toggleId);
+function openStaffSheet(s) {
+  const body = openSheet(`
+    <form class="sheet-form" id="staff-form" novalidate>
+      <h3>${s ? 'Edit staff' : 'Add staff'}</h3>
+      <label class="field"><span>Name</span><input name="name" class="input" value="${esc(s?.name || '')}" required autocomplete="off"></label>
+      <label class="field"><span>Hourly rate (${esc(CURRENCY)})</span><input name="rate" class="input" type="number" inputmode="decimal" min="0" step="0.01" value="${s ? (s.rate_pence / 100).toFixed(2) : ''}" required></label>
+      <label class="field"><span>Phone <em>(optional)</em></span><input name="phone" class="input" type="tel" inputmode="tel" value="${esc(s?.phone || '')}"></label>
+      ${s ? '<p class="hint">A new rate applies to shifts added from now on. Past shifts keep their rate.</p>' : ''}
+      <p class="error" id="staff-error" role="alert"></p>
+      ${s ? `<button type="button" class="btn ghost block" id="staff-toggle">${s.active ? 'Mark as inactive' : 'Mark as active'}</button>` : ''}
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="staff-cancel">Cancel</button>
+        <button type="submit" class="btn primary">${s ? 'Save' : 'Add'}</button>
+      </div>
+    </form>`);
+  const f = $('#staff-form', body);
+  $('#staff-cancel', body).addEventListener('click', closeSheet);
+  $('#staff-toggle', body)?.addEventListener('click', async () => {
     await api('/staff/' + s.id, { method: 'PUT', body: { active: !s.active } });
+    closeSheet(); toast(s.active ? `${s.name} marked inactive` : `${s.name} marked active`);
     await loadStaff(); renderStaff();
-  }
+  });
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = formData(f);
+    if (!data.name.trim()) { $('#staff-error').textContent = 'Name is required'; return; }
+    if (data.rate === '') { $('#staff-error').textContent = 'Hourly rate is required'; return; }
+    try {
+      if (s) await api('/staff/' + s.id, { method: 'PUT', body: data });
+      else await api('/staff', { method: 'POST', body: data });
+      closeSheet(); toast(s ? 'Saved' : `${data.name.trim()} added`);
+      await loadStaff(); renderStaff();
+    } catch (err) { $('#staff-error').textContent = err.message; }
+  });
+}
+
+$('#add-staff').addEventListener('click', () => openStaffSheet(null));
+$('#staff-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-staff]');
+  if (b) openStaffSheet(staffList.find((x) => String(x.id) === b.dataset.staff));
 });
 
-// ---------- dashboard ----------
-let dashWeek = null; // null = current week
-
-function weekName(ws, current) {
-  const diff = Math.round((Date.parse(ws) - Date.parse(current)) / (7 * 864e5));
-  if (diff === 0) return 'This week';
-  if (diff === -1) return 'Last week';
-  if (diff === 1) return 'Next week';
-  return diff < 0 ? `${-diff} weeks ago` : `In ${diff} weeks`;
-}
+// ---------- home ----------
+let dashWeek = null;
 
 async function loadDashboard() {
   const d = await api('/dashboard' + (dashWeek ? `?week=${dashWeek}` : ''));
   dashWeek = d.week_start;
-  const isCurrent = d.week_start === d.current_week_start;
-  const name = weekName(d.week_start, d.current_week_start);
+  const name = weekName(d.week_start);
+  $('#view-title').textContent = name;
   $('#dash-title').textContent = name;
   $('#dash-week').textContent = weekLabel(d.week_start);
-  $('#dash-today').classList.toggle('hidden', isCurrent);
   const t = d.totals;
-  const weekStatus = (s) => {
-    if (s.this_week_paid === null) return '<span class="muted">–</span>';
-    return s.this_week_paid ? '<span class="badge paid">Paid</span>' : '<span class="badge unpaid">Unpaid</span>';
-  };
-  $('#dash-stats').innerHTML = [
-    [`Hours · ${name.toLowerCase()}`, hours(t.this_week_minutes)],
-    [`Pay · ${name.toLowerCase()}`, money(t.this_week_pence)],
-    ['Unpaid (owed)', money(t.unpaid_pence)],
-    ['Paid (all time)', money(t.paid_pence)],
-    ['Hours (all time)', hours(t.total_minutes)],
-  ].map(([l, v]) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
-  const rows = d.staff.map((s) => `
-    <tr>
-      <td>${esc(s.name)}${s.active ? '' : ' <span class="muted">(inactive)</span>'}</td>
-      <td class="num">${money(s.rate_pence)}</td>
-      <td class="num">${hours(s.this_week_minutes)}</td>
-      <td class="num">${money(s.this_week_pence)}</td>
-      <td>${weekStatus(s)}</td>
-      <td class="num">${hours(s.total_minutes)}</td>
-      <td class="num">${money(s.paid_pence)}</td>
-      <td class="num">${s.unpaid_pence ? `<span class="badge unpaid">${money(s.unpaid_pence)}</span> <span class="muted">${s.unpaid_weeks} wk</span>` : '<span class="badge paid">Nothing owed</span>'}</td>
-    </tr>`).join('');
-  $('#dash-table').innerHTML = `
-    <thead><tr><th>Staff</th><th class="num">Rate/h</th><th class="num">Hours (wk)</th><th class="num">Pay (wk)</th><th>Week status</th>
-      <th class="num">Total hours</th><th class="num">Total paid</th><th class="num">Unpaid (all)</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="8" class="empty">No staff yet.</td></tr>'}</tbody>
-    ${d.staff.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${hours(t.this_week_minutes)}</td><td class="num">${money(t.this_week_pence)}</td><td></td>
-      <td class="num">${hours(t.total_minutes)}</td><td class="num">${money(t.paid_pence)}</td><td class="num">${money(t.unpaid_pence)}</td></tr></tfoot>` : ''}`;
+  $('#dash-hours').textContent = hours(t.this_week_minutes);
+  $('#dash-pay').textContent = money(t.this_week_pence);
+  $('#dash-owed').textContent = money(t.unpaid_pence);
+  const unpaidWeeks = d.staff.reduce((n, s) => n + s.unpaid_weeks, 0);
+  $('#dash-owed-sub').textContent = unpaidWeeks ? `${unpaidWeeks} unpaid week${unpaidWeeks > 1 ? 's' : ''}` : 'All paid up';
+  $('#dash-paid').textContent = money(t.paid_pence);
+  $('#dash-hours-all').textContent = `${hours(t.total_minutes)} in total`;
+
+  const shown = d.staff.filter((s) => s.active || s.this_week_minutes);
+  shown.sort((a, b) => b.this_week_minutes - a.this_week_minutes || a.name.localeCompare(b.name));
+  $('#dash-staff').innerHTML = shown.length ? shown.map((s) => `
+    <button class="item" data-add-for="${s.id}">
+      <span class="avatar">${esc(initials(s.name))}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(s.name)}</span>
+        <span class="item-sub">${s.this_week_minutes ? hours(s.this_week_minutes) : 'No hours yet'} · ${money(s.rate_pence)}/h</span>
+      </span>
+      <span class="item-end">
+        <span class="item-amount">${money(s.this_week_pence)}</span>
+        ${s.this_week_paid === null ? '' : statusBadge(s.this_week_paid)}
+      </span>
+    </button>`).join('')
+    : emptyState('users', 'No staff yet.<br><button class="btn primary sm" data-goto="staff" style="margin-top:8px">Add staff</button>');
 }
 
-$('#dash-prev').addEventListener('click', () => { dashWeek = addDays(dashWeek, -7); loadDashboard(); });
-$('#dash-next').addEventListener('click', () => { dashWeek = addDays(dashWeek, 7); loadDashboard(); });
-$('#dash-today').addEventListener('click', () => { dashWeek = null; loadDashboard(); });
+$('#dash-switch').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-step]');
+  if (!b) return;
+  const step = Number(b.dataset.step);
+  dashWeek = step === 0 ? weekStart(today()) : addDays(dashWeek, step * 7);
+  loadDashboard();
+});
 
-// ---------- hours ----------
-let hoursWeek = weekStart(today());
+$('section[data-view="home"]').addEventListener('click', (e) => {
+  const g = e.target.closest('[data-goto]');
+  if (g) {
+    if (g.dataset.filter !== undefined) { $('#weeks-staff').value = ''; setWeeksStatus(g.dataset.filter); }
+    go(g.dataset.goto);
+    return;
+  }
+  const a = e.target.closest('[data-add-for]');
+  if (a) {
+    selectedStaffId = a.dataset.addFor;
+    setDate(dashWeek === weekStart(today()) ? today() : dashWeek);
+    go('add');
+  }
+});
 
-// Auto-insert the colon so "2200" becomes "22:00".
-$$('input.time').forEach((inp) => inp.addEventListener('input', () => {
-  const digits = inp.value.replace(/\D/g, '').slice(0, 4);
-  inp.value = digits.length > 2 ? digits.slice(0, 2) + ':' + digits.slice(2) : digits;
+// ---------- add hours ----------
+const shiftForm = $('#shift-form');
+let selectedStaffId = null;
+let hoursWeek = null;
+
+function renderStaffChips() {
+  const active = staffList.filter((s) => s.active);
+  if (!active.some((s) => String(s.id) === String(selectedStaffId))) selectedStaffId = active[0] ? String(active[0].id) : null;
+  const editing = !!shiftForm.elements.edit_id.value;
+  $('#staff-chips').innerHTML = active.length
+    ? active.map((s) => `<button type="button" class="chip" role="radio" aria-checked="${String(s.id) === String(selectedStaffId)}" data-id="${s.id}" ${editing && String(s.id) !== String(selectedStaffId) ? 'disabled' : ''}>${esc(s.name)}</button>`).join('')
+    : '<button type="button" class="btn primary sm" data-goto-staff>Add staff first</button>';
+}
+
+$('#staff-chips').addEventListener('click', (e) => {
+  if (e.target.closest('[data-goto-staff]')) { go('staff'); return; }
+  const c = e.target.closest('.chip');
+  if (!c || c.disabled) return;
+  selectedStaffId = c.dataset.id;
+  renderStaffChips(); updatePreview(); loadHoursList();
+});
+
+function setDate(iso) {
+  shiftForm.elements.shift_date.value = iso;
+  $$('#date-quick button').forEach((b) => b.classList.toggle('active', addDays(today(), Number(b.dataset.days)) === iso));
+  if (iso && weekStart(iso) !== hoursWeek) { hoursWeek = weekStart(iso); loadHoursList(); }
   updatePreview();
-}));
-['shift_date', 'break_minutes'].forEach((n) => $(`#shift-form [name=${n}]`).addEventListener('input', updatePreview));
-$('#shift-form [name=staff_id]').addEventListener('change', loadHoursTable);
-$('#shift-form [name=shift_date]').addEventListener('change', (e) => {
-  if (e.target.value) { hoursWeek = weekStart(e.target.value); loadHoursTable(); }
+}
+$('#date-quick').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-days]');
+  if (b) setDate(addDays(today(), Number(b.dataset.days)));
+});
+shiftForm.elements.shift_date.addEventListener('change', (e) => setDate(e.target.value));
+
+function setBreak(mins) {
+  mins = Math.max(0, Math.min(600, mins));
+  shiftForm.elements.break_minutes.value = mins;
+  $('#break-out').textContent = mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins} min`;
+  updatePreview();
+}
+$('.stepper').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-break]');
+  if (b) setBreak(Number(shiftForm.elements.break_minutes.value) + Number(b.dataset.break));
+});
+
+// Auto-insert the colon so "2200" becomes "22:00"; jump to "To" once "From" is complete.
+$$('input.time').forEach((inp) => {
+  inp.addEventListener('input', () => {
+    const digits = inp.value.replace(/\D/g, '').slice(0, 4);
+    inp.value = digits.length > 2 ? digits.slice(0, 2) + ':' + digits.slice(2) : digits;
+    if (inp.name === 'start_time' && digits.length === 4 && parseTime(inp.value) !== null) shiftForm.elements.end_time.focus();
+    updatePreview();
+  });
+  inp.addEventListener('focus', () => inp.select());
 });
 
 function updatePreview() {
-  const f = $('#shift-form');
+  const f = shiftForm.elements;
   const s = parseTime(f.start_time.value);
   const en = parseTime(f.end_time.value);
   const out = $('#shift-preview');
-  if (s === null || en === null) { out.textContent = ''; return; }
+  out.classList.remove('warn');
+  if (s === null || en === null) {
+    const bad = (f.start_time.value.length === 5 && s === null) || (f.end_time.value.length === 5 && en === null);
+    if (bad) {
+      out.classList.add('warn');
+      out.innerHTML = `<div class="preview-main">${icon('alert')} Use 24-hour time, 00:00 to 23:59</div>`;
+    } else {
+      out.innerHTML = '<div class="preview-main">--</div><div class="preview-sub">Enter start and end times</div>';
+    }
+    return;
+  }
   let mins = en - s;
   const overnight = mins <= 0;
   if (overnight) mins += 1440;
   mins -= Number(f.break_minutes.value) || 0;
-  if (mins <= 0) { out.textContent = 'Break is longer than the shift'; return; }
-  let text = `= ${hours(mins)} (${decimalHours(mins)} h)`;
-  if (overnight && f.shift_date.value) text += ` · overnight, ends ${fmtDate(addDays(f.shift_date.value, 1))} ${f.end_time.value}`;
-  const staff = staffList.find((x) => String(x.id) === f.staff_id.value);
-  if (staff) text += ` · ${money(Math.round(mins * staff.rate_pence / 60))}`;
-  if (f.shift_date.value) text += ` · counts in week ${weekLabel(weekStart(f.shift_date.value))}`;
-  out.textContent = text;
+  if (mins <= 0) {
+    out.classList.add('warn');
+    out.innerHTML = `<div class="preview-main">${icon('alert')} Break is longer than the shift</div>`;
+    return;
+  }
+  const staff = staffList.find((x) => String(x.id) === String(selectedStaffId));
+  const pay = staff ? `<small>${money(Math.round(mins * staff.rate_pence / 60))}</small>` : '';
+  const parts = [];
+  if (overnight && f.shift_date.value) parts.push(`<span class="badge night">${icon('moon')}Overnight</span> ends ${fmtDate(addDays(f.shift_date.value, 1))}, ${esc(f.end_time.value)}`);
+  if (f.shift_date.value) parts.push(`Counts in week ${weekLabel(weekStart(f.shift_date.value))}`);
+  out.innerHTML = `<div class="preview-main">${hours(mins)} ${pay}</div><div class="preview-sub">${parts.join('<br>')}</div>`;
 }
 
-async function loadHours() {
-  const f = $('#shift-form');
-  if (!f.shift_date.value) f.shift_date.value = today();
-  await loadHoursTable();
+async function loadAdd() {
+  if (!shiftForm.elements.shift_date.value) setDate(today());
+  renderStaffChips();
+  setBreak(Number(shiftForm.elements.break_minutes.value) || 0);
+  await loadHoursList();
 }
 
-async function loadHoursTable() {
-  const staffId = $('#shift-form [name=staff_id]').value;
+async function loadHoursList() {
+  $('#hours-title').textContent = weekName(hoursWeek);
   $('#hours-week').textContent = weekLabel(hoursWeek);
-  if (!staffId) { $('#hours-table').innerHTML = '<tbody><tr><td class="empty">Add staff first.</td></tr></tbody>'; return; }
-  const shifts = await api(`/shifts?staff_id=${staffId}&week_start=${hoursWeek}`);
+  if (!selectedStaffId) { $('#hours-list').innerHTML = ''; $('#hours-summary').innerHTML = ''; return; }
+  const shifts = await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`);
   shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
   const total = shifts.reduce((t, s) => t + s.minutes, 0);
-  const pay = shifts.reduce((t, s) => t + Math.round(s.minutes * s.rate_pence / 60), 0);
+  const pay = shifts.reduce((t, s) => t + shiftPay(s), 0);
   const paid = shifts.some((s) => s.paid);
-  const rows = shifts.map((s) => `
-    <tr>
-      <td>${fmtDate(s.shift_date)}</td>
-      <td>${s.start_time} → ${s.end_time} ${s.end_time <= s.start_time ? '<span class="badge night">+1 day</span>' : ''}</td>
-      <td class="num">${s.break_minutes ? s.break_minutes + 'm' : '–'}</td>
-      <td class="num">${hours(s.minutes)}</td>
-      <td class="num">${money(Math.round(s.minutes * s.rate_pence / 60))}</td>
-      <td>${esc(s.note || '')}</td>
-      <td class="num">${s.paid ? '<span class="badge paid">Paid</span>' : `
-        <button class="btn small" data-edit='${esc(JSON.stringify(s))}'>Edit</button>
-        <button class="btn small ghost danger" data-del="${s.id}">Delete</button>`}</td>
-    </tr>`).join('');
-  $('#hours-table').innerHTML = `
-    <thead><tr><th>Date</th><th>Time</th><th class="num">Break</th><th class="num">Hours</th><th class="num">Pay</th><th>Note</th><th></th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="7" class="empty">No shifts this week.</td></tr>'}</tbody>
-    ${shifts.length ? `<tfoot><tr><td colspan="3">Week total ${paid ? '<span class="badge paid">Paid</span>' : '<span class="badge unpaid">Unpaid</span>'}</td>
-      <td class="num">${hours(total)}</td><td class="num">${money(pay)}</td><td colspan="2"></td></tr></tfoot>` : ''}`;
+  const staff = staffList.find((x) => String(x.id) === String(selectedStaffId));
+  $('#hours-summary').innerHTML = shifts.length ? `
+    <div class="summary-bar">
+      <span>${esc(staff?.name || '')} · <strong>${hours(total)}</strong></span>
+      <span><strong>${money(pay)}</strong> ${statusBadge(paid)}</span>
+    </div>` : '';
+  $('#hours-list').innerHTML = shifts.length ? shifts.map((s) => {
+    const d = utc(s.shift_date);
+    return `
+    <div class="item">
+      <div class="date-block"><div class="d">${DAYS[d.getUTCDay()]}</div><div class="n">${d.getUTCDate()}</div></div>
+      <div class="item-main">
+        <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
+        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''} · ${money(shiftPay(s))}${s.note ? ' · ' + esc(s.note) : ''}</span>
+      </div>
+      ${s.paid ? '' : `<div class="item-actions">
+        <button class="icon-btn" data-edit='${esc(JSON.stringify(s))}' aria-label="Edit shift">${icon('pencil')}</button>
+        <button class="icon-btn danger" data-del="${s.id}" aria-label="Delete shift">${icon('trash')}</button>
+      </div>`}
+    </div>`;
+  }).join('') : emptyState('calendar', `No shifts for ${esc(staff?.name || 'this person')} in this week.`);
 }
 
-$('#hours-prev').addEventListener('click', () => { hoursWeek = addDays(hoursWeek, -7); loadHoursTable(); });
-$('#hours-next').addEventListener('click', () => { hoursWeek = addDays(hoursWeek, 7); loadHoursTable(); });
+$('#hours-switch').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-step]');
+  if (b) { hoursWeek = addDays(hoursWeek, Number(b.dataset.step) * 7); loadHoursList(); }
+});
 
 function resetShiftForm() {
-  const f = $('#shift-form');
-  const keepStaff = f.staff_id.value;
-  const keepDate = f.shift_date.value;
-  f.reset();
-  f.id.value = '';
-  f.staff_id.value = keepStaff;
-  f.shift_date.value = keepDate || today();
-  f.staff_id.disabled = false;
+  const f = shiftForm.elements;
+  f.edit_id.value = '';
+  f.start_time.value = '';
+  f.end_time.value = '';
+  f.note.value = '';
+  setBreak(0);
   $('#shift-submit').textContent = 'Save shift';
   $('#shift-cancel').classList.add('hidden');
   $('#shift-error').textContent = '';
+  $('#view-title').textContent = 'Add hours';
+  renderStaffChips();
   updatePreview();
 }
 
-$('#shift-form').addEventListener('submit', async (e) => {
+shiftForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const f = e.target;
-  f.staff_id.disabled = false;
-  const data = formData(f);
+  const f = shiftForm.elements;
   $('#shift-error').textContent = '';
+  if (!selectedStaffId) { $('#shift-error').textContent = 'Add a staff member first'; return; }
+  if (!f.shift_date.value) { $('#shift-error').textContent = 'Pick a date'; return; }
+  if (parseTime(f.start_time.value) === null || parseTime(f.end_time.value) === null) {
+    $('#shift-error').textContent = 'Enter From and To as 24-hour times, e.g. 09:00 and 17:30';
+    return;
+  }
+  const data = { ...formData(shiftForm), staff_id: selectedStaffId };
+  const btn = $('#shift-submit');
+  btn.disabled = true;
   try {
-    if (data.id) await api('/shifts/' + data.id, { method: 'PUT', body: data });
+    const editing = !!data.edit_id;
+    if (editing) await api('/shifts/' + data.edit_id, { method: 'PUT', body: data });
     else await api('/shifts', { method: 'POST', body: data });
     hoursWeek = weekStart(data.shift_date);
     resetShiftForm();
-    // Next shift is usually the following day.
-    f.shift_date.value = addDays(data.shift_date, 1);
-    await loadHoursTable();
+    toast(editing ? 'Shift updated' : 'Shift saved');
+    // The next shift is usually the following day.
+    if (!editing) setDate(addDays(data.shift_date, 1));
+    await loadHoursList();
   } catch (err) { $('#shift-error').textContent = err.message; }
+  finally { btn.disabled = false; }
 });
 $('#shift-cancel').addEventListener('click', resetShiftForm);
 
-$('#hours-table').addEventListener('click', async (e) => {
-  if (e.target.dataset.edit) {
-    const s = JSON.parse(e.target.dataset.edit);
-    const f = $('#shift-form');
-    f.id.value = s.id; f.staff_id.value = s.staff_id; f.staff_id.disabled = true;
-    f.shift_date.value = s.shift_date; f.start_time.value = s.start_time; f.end_time.value = s.end_time;
-    f.break_minutes.value = s.break_minutes; f.note.value = s.note || '';
+$('#hours-list').addEventListener('click', async (e) => {
+  const edit = e.target.closest('[data-edit]');
+  const del = e.target.closest('[data-del]');
+  if (edit) {
+    const s = JSON.parse(edit.dataset.edit);
+    const f = shiftForm.elements;
+    f.edit_id.value = s.id;
+    selectedStaffId = String(s.staff_id);
+    renderStaffChips();
+    f.start_time.value = s.start_time; f.end_time.value = s.end_time;
+    f.note.value = s.note || '';
+    setBreak(s.break_minutes);
+    setDate(s.shift_date);
     $('#shift-submit').textContent = 'Save changes';
     $('#shift-cancel').classList.remove('hidden');
-    updatePreview();
-    f.scrollIntoView({ behavior: 'smooth' });
+    $('#view-title').textContent = 'Edit shift';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-  if (e.target.dataset.del && confirm('Delete this shift?')) {
-    try { await api('/shifts/' + e.target.dataset.del, { method: 'DELETE' }); await loadHoursTable(); }
-    catch (err) { alert(err.message); }
+  if (del && await confirmSheet({ title: 'Delete shift?', message: 'This shift will be removed from the week.', confirmText: 'Delete', danger: true })) {
+    try { await api('/shifts/' + del.dataset.del, { method: 'DELETE' }); toast('Shift deleted'); await loadHoursList(); }
+    catch (err) { toast(err.message); }
   }
 });
 
 // ---------- weeks ----------
 let weeksData = [];
+let weeksStatus = 'unpaid';
+
+function setWeeksStatus(st) {
+  weeksStatus = st;
+  $$('#weeks-status button').forEach((b) => b.classList.toggle('active', b.dataset.status === st));
+}
 
 async function loadWeeks() {
   const staffId = $('#weeks-staff').value;
@@ -355,109 +543,149 @@ async function loadWeeks() {
 }
 
 function renderWeeks() {
-  const status = $('#weeks-status').value;
-  const list = weeksData.filter((w) => !status || (status === 'paid') === w.paid);
-  const rows = list.map((w, i) => `
-    <tr>
-      <td>${weekLabel(w.week_start)}</td>
-      <td>${esc(w.name)}</td>
-      <td class="num">${w.shift_count}</td>
-      <td class="num">${hours(w.minutes)}</td>
-      <td class="num">${money(w.paid ? w.paid_pence : w.amount_pence)}</td>
-      <td>${w.paid ? `<span class="badge paid">Paid ${fmtDate(w.paid_on)}</span>` : '<span class="badge unpaid">Unpaid</span>'}</td>
-      <td class="num">
-        <button class="btn small ghost" data-detail="${i}">Shifts</button>
-        ${w.paid ? '' : `<button class="btn small primary" data-pay="${i}">Mark paid</button>`}
-      </td>
-    </tr>
-    <tr class="detail-row hidden" id="detail-${i}"><td colspan="7"></td></tr>`).join('');
-  const sum = (k) => list.reduce((t, w) => t + (w[k] || 0), 0);
-  const unpaidTotal = list.filter((w) => !w.paid).reduce((t, w) => t + w.amount_pence, 0);
-  $('#weeks-table').innerHTML = `
-    <thead><tr><th>Week (Wed–Tue)</th><th>Staff</th><th class="num">Shifts</th><th class="num">Hours</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="7" class="empty">No weeks to show.</td></tr>'}</tbody>
-    ${list.length ? `<tfoot><tr><td colspan="3">Total · unpaid ${money(unpaidTotal)}</td><td class="num">${hours(sum('minutes'))}</td>
-      <td class="num">${money(list.reduce((t, w) => t + (w.paid ? w.paid_pence : w.amount_pence), 0))}</td><td colspan="2"></td></tr></tfoot>` : ''}`;
+  const list = weeksData.filter((w) => !weeksStatus || (weeksStatus === 'paid') === w.paid);
+  const amount = (w) => (w.paid ? w.paid_pence : w.amount_pence);
+  const total = list.reduce((t, w) => t + amount(w), 0);
+  const mins = list.reduce((t, w) => t + w.minutes, 0);
+  $('#weeks-total').innerHTML = list.length ? `
+    <div class="summary-bar">
+      <span>${list.length} week${list.length > 1 ? 's' : ''} · ${hours(mins)}</span>
+      <strong>${weeksStatus === 'unpaid' ? 'Owed ' : ''}${money(total)}</strong>
+    </div>` : '';
+  const msg = { unpaid: 'Nothing owed. All weeks are paid.', paid: 'No paid weeks yet.', '': 'No hours recorded yet.' }[weeksStatus];
+  $('#weeks-list').innerHTML = list.length ? list.map((w) => {
+    const i = weeksData.indexOf(w);
+    return `
+    <div class="item week-card">
+      <div class="row">
+        <span class="avatar">${esc(initials(w.name))}</span>
+        <span class="item-main">
+          <span class="item-title">${esc(w.name)}</span>
+          <span class="item-sub">${weekLabel(w.week_start)}</span>
+        </span>
+        <span class="item-end">
+          <span class="item-amount">${money(amount(w))}</span>
+          ${statusBadge(w.paid)}
+        </span>
+      </div>
+      <div class="item-sub">${hours(w.minutes)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}${w.paid ? ` · paid ${fmtDate(w.paid_on)}${w.method ? ' by ' + esc(w.method.toLowerCase()) : ''}` : ''}</div>
+      <div class="details hidden" id="detail-${i}"></div>
+      <div class="card-actions" ${w.paid ? 'style="grid-template-columns:1fr"' : ''}>
+        <button class="btn ghost sm" data-detail="${i}">${icon('list')} Shifts</button>
+        ${w.paid ? '' : `<button class="btn success sm" data-pay="${i}">${icon('check')} Mark paid</button>`}
+      </div>
+    </div>`;
+  }).join('') : emptyState(weeksStatus === 'unpaid' ? 'check' : 'calendar', msg);
 }
 
 $('#weeks-staff').addEventListener('change', loadWeeks);
-$('#weeks-status').addEventListener('change', renderWeeks);
+$('#weeks-status').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-status]');
+  if (b) { setWeeksStatus(b.dataset.status); renderWeeks(); }
+});
 
-$('#weeks-table').addEventListener('click', async (e) => {
-  const di = e.target.dataset.detail;
-  if (di !== undefined) {
-    const row = $('#detail-' + di);
-    if (!row.classList.contains('hidden')) { row.classList.add('hidden'); return; }
-    const w = weeksData[di];
+$('#weeks-list').addEventListener('click', async (e) => {
+  const det = e.target.closest('[data-detail]');
+  if (det) {
+    const box = $('#detail-' + det.dataset.detail);
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    const w = weeksData[det.dataset.detail];
     const shifts = await api(`/shifts?staff_id=${w.staff_id}&week_start=${w.week_start}`);
     shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
-    row.firstElementChild.innerHTML = shifts.map((s) =>
-      `${fmtDate(s.shift_date)}: ${s.start_time} → ${s.end_time}${s.end_time <= s.start_time ? ' (+1 day)' : ''}` +
-      `${s.break_minutes ? `, break ${s.break_minutes}m` : ''} = <strong>${hours(s.minutes)}</strong>` +
-      `${s.note ? ` – ${esc(s.note)}` : ''}`).join('<br>');
-    row.classList.remove('hidden');
+    box.innerHTML = shifts.map((s) => `
+      <div class="line">
+        <span>${fmtDate(s.shift_date)} · ${s.start_time}–${s.end_time}${s.end_time <= s.start_time ? ' (+1)' : ''}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}</span>
+        <strong>${hours(s.minutes)}</strong>
+      </div>`).join('');
+    box.classList.remove('hidden');
   }
-  const pi = e.target.dataset.pay;
-  if (pi !== undefined) openPayDialog(weeksData[pi]);
+  const pay = e.target.closest('[data-pay]');
+  if (pay) openPaySheet(weeksData[pay.dataset.pay]);
 });
 
-function openPayDialog(w) {
-  const f = $('#pay-form');
-  f.reset();
-  f.staff_id.value = w.staff_id;
-  f.week_start.value = w.week_start;
-  f.paid_on.value = today();
-  $('#pay-error').textContent = '';
-  $('#pay-summary').innerHTML = `<strong>${esc(w.name)}</strong><br>${weekLabel(w.week_start)}<br>${hours(w.minutes)} · <strong>${money(w.amount_pence)}</strong>`;
-  $('#pay-dialog').showModal();
+function openPaySheet(w) {
+  const body = openSheet(`
+    <form class="sheet-form" id="pay-form" novalidate>
+      <h3>Mark week as paid</h3>
+      <div class="sheet-summary">
+        <div>
+          <div class="item-title">${esc(w.name)}</div>
+          <div class="item-sub">${weekLabel(w.week_start)}</div>
+          <div class="item-sub">${hours(w.minutes)}</div>
+        </div>
+        <div class="big">${money(w.amount_pence)}</div>
+      </div>
+      <label class="field"><span>Paid on</span><input name="paid_on" type="date" class="input" value="${today()}" required></label>
+      <div class="field">
+        <span>Method</span>
+        <div class="segmented" id="pay-method">
+          <button type="button" data-m="Cash" class="active">Cash</button>
+          <button type="button" data-m="Bank transfer">Bank</button>
+          <button type="button" data-m="Other">Other</button>
+        </div>
+      </div>
+      <label class="field"><span>Note <em>(optional)</em></span><input name="note" class="input" maxlength="200"></label>
+      <p class="error" id="pay-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="pay-cancel">Cancel</button>
+        <button type="submit" class="btn success">${icon('check')} Paid</button>
+      </div>
+    </form>`);
+  let method = 'Cash';
+  $('#pay-method', body).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-m]');
+    if (!b) return;
+    method = b.dataset.m;
+    $$('#pay-method button', body).forEach((x) => x.classList.toggle('active', x === b));
+  });
+  $('#pay-cancel', body).addEventListener('click', closeSheet);
+  $('#pay-form', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/payments', { method: 'POST', body: { ...formData(e.target), method, staff_id: w.staff_id, week_start: w.week_start } });
+      closeSheet();
+      toast(`${money(w.amount_pence)} paid to ${w.name}`);
+      await loadWeeks();
+    } catch (err) { $('#pay-error').textContent = err.message; }
+  });
 }
-
-$('#pay-form').addEventListener('submit', async (e) => {
-  if (e.submitter?.value !== 'confirm') return;
-  e.preventDefault();
-  try {
-    await api('/payments', { method: 'POST', body: formData(e.target) });
-    $('#pay-dialog').close();
-    await loadWeeks();
-  } catch (err) { $('#pay-error').textContent = err.message; }
-});
 
 // ---------- payments ----------
 async function loadPayments() {
   const staffId = $('#payments-staff').value;
-  const [payments, weeks] = await Promise.all([
-    api('/payments' + (staffId ? `?staff_id=${staffId}` : '')),
-    api('/weeks' + (staffId ? `?staff_id=${staffId}` : '')),
-  ]);
+  const q = staffId ? `?staff_id=${staffId}` : '';
+  const [payments, weeks] = await Promise.all([api('/payments' + q), api('/weeks' + q)]);
   const paidTotal = payments.reduce((t, p) => t + p.amount_pence, 0);
   const unpaid = weeks.filter((w) => !w.paid);
-  $('#payments-stats').innerHTML = [
-    ['Total paid', money(paidTotal)],
-    ['Payments made', payments.length],
-    ['Still owed', money(unpaid.reduce((t, w) => t + w.amount_pence, 0))],
-    ['Unpaid weeks', unpaid.length],
-  ].map(([l, v]) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
-  const rows = payments.map((p) => `
-    <tr>
-      <td>${fmtDate(p.paid_on)}</td>
-      <td>${esc(p.name)}</td>
-      <td>${weekLabel(p.week_start)}</td>
-      <td class="num">${hours(p.minutes)}</td>
-      <td class="num">${money(p.amount_pence)}</td>
-      <td>${esc(p.method || '')}</td>
-      <td>${esc(p.note || '')}</td>
-      <td class="num"><button class="btn small ghost danger" data-undo="${p.id}">Undo</button></td>
-    </tr>`).join('');
-  $('#payments-table').innerHTML = `
-    <thead><tr><th>Paid on</th><th>Staff</th><th>Week</th><th class="num">Hours</th><th class="num">Amount</th><th>Method</th><th>Note</th><th></th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="8" class="empty">No payments yet.</td></tr>'}</tbody>
-    ${payments.length ? `<tfoot><tr><td colspan="4">Total</td><td class="num">${money(paidTotal)}</td><td colspan="3"></td></tr></tfoot>` : ''}`;
+  const owed = unpaid.reduce((t, w) => t + w.amount_pence, 0);
+  $('#payments-stats').innerHTML = `
+    <div class="stat"><span class="stat-label"><span class="dot paid"></span>Total paid</span><span class="stat-value">${money(paidTotal)}</span><span class="stat-sub">${payments.length} payment${payments.length === 1 ? '' : 's'}</span></div>
+    <button class="stat" id="pay-owed"><span class="stat-label"><span class="dot unpaid"></span>Still owed</span><span class="stat-value">${money(owed)}</span><span class="stat-sub">${unpaid.length} unpaid week${unpaid.length === 1 ? '' : 's'}</span></button>`;
+  $('#payments-list').innerHTML = payments.length ? payments.map((p) => `
+    <div class="item">
+      <span class="avatar">${esc(initials(p.name))}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(p.name)} · ${money(p.amount_pence)}</span>
+        <span class="item-sub">${fmtDate(p.paid_on)}${p.method ? ' · ' + esc(p.method) : ''} · ${hours(p.minutes)}</span>
+        <span class="item-sub">Week ${weekLabel(p.week_start)}${p.note ? ' · ' + esc(p.note) : ''}</span>
+      </span>
+      <button class="icon-btn" data-undo="${p.id}" aria-label="Undo payment">${icon('undo')}</button>
+    </div>`).join('') : emptyState('wallet', 'No payments yet.');
 }
 $('#payments-staff').addEventListener('change', loadPayments);
+$('#payments-stats').addEventListener('click', (e) => {
+  if (e.target.closest('#pay-owed')) {
+    $('#weeks-staff').value = $('#payments-staff').value;
+    setWeeksStatus('unpaid');
+    go('weeks');
+  }
+});
 
-$('#payments-table').addEventListener('click', async (e) => {
-  if (e.target.dataset.undo && confirm('Undo this payment? The week will go back to Unpaid.')) {
-    await api('/payments/' + e.target.dataset.undo, { method: 'DELETE' });
+$('#payments-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-undo]');
+  if (b && await confirmSheet({ title: 'Undo payment?', message: 'The week goes back to Unpaid and its shifts can be edited again.', confirmText: 'Undo payment', danger: true })) {
+    await api('/payments/' + b.dataset.undo, { method: 'DELETE' });
+    toast('Payment undone');
     loadPayments();
   }
 });
@@ -466,12 +694,14 @@ $('#payments-table').addEventListener('click', async (e) => {
 $('#pw-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = $('#pw-msg');
+  msg.textContent = '';
   try {
     await api('/change-password', { method: 'POST', body: formData(e.target) });
     e.target.reset();
-    msg.style.color = 'var(--paid)'; msg.textContent = 'Password updated.';
-  } catch (err) { msg.style.color = ''; msg.textContent = err.message; }
+    toast('Password updated');
+  } catch (err) { msg.textContent = err.message; }
 });
 
 // ---------- start ----------
-api('/me').then((me) => { CURRENCY = me.currency; WEEK_START_DAY = me.week_start_day; showApp(); }).catch(() => showLogin());
+hydrateIcons();
+api('/me').then((me) => { applyMe(me); showApp(); }).catch(() => showLogin());

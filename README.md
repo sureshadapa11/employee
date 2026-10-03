@@ -13,6 +13,7 @@ A small web app for recording staff working hours, calculating weekly pay, and t
 - **Payments**: mark a week paid (date, method, note). Paid weeks are locked; undo the payment to edit them.
 - **Payment history** and a **dashboard** with this week's hours/pay, total paid and total still owed.
 - Single admin login (you enter hours for everyone).
+- Mobile-first UI: bottom tab bar, bottom sheets, large touch targets, light/dark mode. No branding.
 
 ## Run it
 
