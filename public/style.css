@@ -354,3 +354,10 @@ dialog.sheet::backdrop { background: rgba(2, 6, 23, .5); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Warning banner ---------- */
+.banner {
+  width: 100%; margin-bottom: 14px; padding: 12px 14px; border-radius: 14px; text-align: left;
+  display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600;
+  background: var(--danger-soft); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}

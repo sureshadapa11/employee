@@ -15,27 +15,37 @@ A small web app for recording staff working hours, calculating weekly pay, and t
 - Single admin login (you enter hours for everyone).
 - Mobile-first UI: bottom tab bar, bottom sheets, large touch targets, light/dark mode. No branding.
 
-## Run it
+## Hosting (Vercel + Neon Postgres)
 
-Requires **Node.js 22.13+** (uses the built-in `node:sqlite`, no native modules).
+The app runs on Vercel as an Express function; files in `public/` are served by Vercel's CDN.
+Data lives in a Neon Postgres database added from the Vercel Marketplace (Storage tab), which sets `DATABASE_URL`.
+Tables and the first admin user are created automatically on the first request.
+
+First login: **admin / admin123**. A banner asks you to change it until you do.
+
+## Run locally
+
+Requires **Node.js 22+**.
 
 ```bash
 npm install
-npm start
+vercel link        # once
+vercel env pull    # writes DATABASE_URL and SESSION_SECRET to .env.local
+npm start          # http://localhost:3000
 ```
-
-Open http://localhost:3000 and log in with **admin / admin123**, then change the password under **Settings**.
 
 ## Configuration (environment variables)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `3000` | HTTP port |
-| `ADMIN_USERNAME` | `admin` | Admin username (first run only) |
-| `ADMIN_PASSWORD` | `admin123` | Admin password (first run only) |
-| `SESSION_SECRET` | random | Set this in production so logins survive restarts |
-| `CURRENCY` | `£` | Currency symbol shown in the app |
-| `DB_PATH` | `data/employee.db` | SQLite database file |
+| `DATABASE_URL` | – | Postgres connection string (set by the Neon integration) |
+| `SESSION_SECRET` | random locally, **required** in production | Signs the login cookie |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin123` | First admin account (first run only) |
+| `CURRENCY` | `£` | Currency symbol |
+| `APP_TIMEZONE` | `Europe/London` | Time zone used for "today" and "this week" |
+| `PORT` | `3000` | Local HTTP port |
+
+Failed logins are limited to 10 per IP address per 15 minutes.
 
 ## Tests
 
@@ -47,7 +57,7 @@ npm test
 
 ```
 server.js        Express API + static files
-lib/db.js        SQLite schema, admin account
+lib/db.js        Postgres schema, admin account
 lib/time.js      Shift length, overnight handling, Wednesday week start
 public/          Frontend (vanilla HTML/CSS/JS)
 test/            Unit tests for time calculations

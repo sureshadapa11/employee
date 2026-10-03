@@ -41,6 +41,7 @@
     </header>
 
     <main>
+      <button class="banner hidden" id="pw-banner" onclick="location.hash='settings'"><i data-icon="alert"></i><span>You are using the default password. Tap to change it.</span></button>
       <!-- Home -->
       <section data-view="home">
         <div class="week-switch" id="dash-switch">
@@ -193,7 +194,7 @@
         <h2 class="section-title">Change password</h2>
         <form id="pw-form" class="card">
           <label class="field"><span>Current password</span><input name="current" type="password" class="input" autocomplete="current-password" required></label>
-          <label class="field"><span>New password</span><input name="next" type="password" class="input" minlength="6" autocomplete="new-password" required></label>
+          <label class="field"><span>New password</span><input name="next" type="password" class="input" minlength="8" autocomplete="new-password" required></label>
           <p class="error" id="pw-msg" role="alert"></p>
           <button class="btn primary block" type="submit">Update password</button>
         </form>

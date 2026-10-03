@@ -139,6 +139,7 @@ function showLogin() {
 function applyMe(me) {
   CURRENCY = me.currency;
   WEEK_START_DAY = me.week_start_day;
+  $('#pw-banner').classList.toggle('hidden', !me.must_change_password);
   $('#settings-info').textContent = `Signed in as ${me.username}. Weeks run ${DAY_NAMES[WEEK_START_DAY]} to ${DAY_NAMES[(WEEK_START_DAY + 6) % 7]}.`;
 }
 
@@ -698,6 +699,7 @@ $('#pw-form').addEventListener('submit', async (e) => {
   try {
     await api('/change-password', { method: 'POST', body: formData(e.target) });
     e.target.reset();
+    $('#pw-banner').classList.add('hidden');
     toast('Password updated');
   } catch (err) { msg.textContent = err.message; }
 });
