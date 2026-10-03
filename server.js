@@ -57,12 +57,22 @@ function readSession(req) {
   } catch { return null; }
 }
 
-function requireAdmin(req, res, next) {
-  const id = readSession(req);
-  if (!id) return res.status(401).json({ error: 'Not logged in' });
-  req.adminId = id;
-  next();
+// Looks the login up on every request so a removed login stops working at once.
+async function requireUser(req, res, next) {
+  try {
+    await ensureSchema();
+    const id = readSession(req);
+    const user = id && await one('SELECT id, username, role, staff_id, must_change_password FROM admin WHERE id = $1', [id]);
+    if (!user) return res.status(401).json({ error: 'Not logged in' });
+    req.user = user;
+    next();
+  } catch (err) { next(err); }
 }
+
+const requireAdmin = (req, res, next) => (req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Not allowed' }));
+
+const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
+const cleanUsername = (u) => String(u || '').trim().toLowerCase();
 
 const toPence = (v) => {
   const n = Number(v);
@@ -115,7 +125,7 @@ app.post('/api/login', h(async (req, res) => {
   if (n >= MAX_FAILURES) throw new HttpError(429, 'Too many failed attempts. Try again in 15 minutes.');
 
   const { username, password } = req.body || {};
-  const admin = await one('SELECT * FROM admin WHERE username = $1', [String(username || '')]);
+  const admin = await one('SELECT * FROM admin WHERE username = $1', [cleanUsername(username)]);
   if (!admin || !verifyPassword(password || '', admin.password_hash)) {
     await query('INSERT INTO login_failures (ip) VALUES ($1)', [ip]);
     await query("DELETE FROM login_failures WHERE at < now() - interval '1 day'");
@@ -131,20 +141,155 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-app.use('/api', requireAdmin);
+// ---- Everyone who is logged in ----
+app.use('/api', requireUser);
 
 app.get('/api/me', h(async (req) => {
-  const a = await one('SELECT username, must_change_password FROM admin WHERE id = $1', [req.adminId]);
-  if (!a) throw new HttpError(401, 'Not logged in');
-  return { username: a.username, must_change_password: a.must_change_password, currency: CURRENCY, week_start_day: WEEK_START_DAY };
+  const u = req.user;
+  const staff = u.staff_id ? await one('SELECT name FROM staff WHERE id = $1', [u.staff_id]) : null;
+  return {
+    username: u.username, role: u.role, staff_name: staff ? staff.name : null,
+    must_change_password: u.must_change_password, currency: CURRENCY, week_start_day: WEEK_START_DAY,
+  };
 }));
 
 app.post('/api/change-password', h(async (req) => {
   const { current, next } = req.body || {};
-  const a = await one('SELECT * FROM admin WHERE id = $1', [req.adminId]);
+  const a = await one('SELECT * FROM admin WHERE id = $1', [req.user.id]);
   if (!verifyPassword(current || '', a.password_hash)) throw bad('Current password is wrong');
   if (!next || String(next).length < 8) throw bad('New password must be at least 8 characters');
   await query('UPDATE admin SET password_hash = $1, must_change_password = FALSE WHERE id = $2', [hashPassword(String(next)), a.id]);
+  return { ok: true };
+}));
+
+// A staff login's own hours for one week, plus recent weeks. Hours only: no rates or money.
+app.get('/api/my', h(async (req) => {
+  const staffId = req.user.staff_id;
+  if (!staffId) throw new HttpError(403, 'This login is not linked to a staff member');
+  if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
+  const ws = weekStart(req.query.week || localToday());
+  const [shifts, weeks] = await Promise.all([
+    query(`SELECT s.id, s.shift_date, s.start_time, s.end_time, s.break_minutes, s.minutes, s.note, (p.id IS NOT NULL) AS paid
+           FROM shifts s LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
+           WHERE s.staff_id = $1 AND s.week_start = $2 ORDER BY s.shift_date, s.start_time`, [staffId, ws]),
+    query(`SELECT s.week_start, SUM(s.minutes)::int AS minutes, COUNT(*)::int AS shift_count, (p.id IS NOT NULL) AS paid
+           FROM shifts s LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
+           WHERE s.staff_id = $1 GROUP BY s.week_start, p.id ORDER BY s.week_start DESC LIMIT 12`, [staffId]),
+  ]);
+  const thisWeek = weeks.find((w) => w.week_start === ws);
+  return {
+    week_start: ws,
+    week_end: weekEnd(ws),
+    current_week_start: weekStart(localToday()),
+    shifts,
+    total_minutes: shifts.reduce((t, s) => t + s.minutes, 0),
+    paid: thisWeek ? thisWeek.paid : null,
+    weeks: weeks.map((w) => ({ ...w, week_end: weekEnd(w.week_start) })),
+  };
+}));
+
+// ---- Adding and changing shifts (admins: anyone's; staff: only their own) ----
+function validateShift(body) {
+  const { shift_date, start_time, end_time, break_minutes = 0, note } = body || {};
+  if (!isValidDate(shift_date)) throw bad('Pick a valid date');
+  if (parseTime(start_time) === null || parseTime(end_time) === null) throw bad('Times must be HH:MM (24-hour)');
+  let minutes;
+  try { minutes = shiftMinutes(start_time, end_time, break_minutes); }
+  catch (e) { throw bad(e.message); }
+  return { shift_date, start_time, end_time, break_minutes: Number(break_minutes) || 0, minutes, note: note || null };
+}
+
+const isStaffLogin = (req) => req.user.role === 'staff';
+
+// Staff never see rates, so strip them from what we send back.
+const forViewer = (req, shift) => {
+  if (!isStaffLogin(req)) return shift;
+  const { rate_pence, ...rest } = shift;
+  return rest;
+};
+
+async function loadOwnShift(req) {
+  const shift = await one('SELECT * FROM shifts WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!shift || (isStaffLogin(req) && shift.staff_id !== req.user.staff_id)) throw new HttpError(404, 'Shift not found');
+  return shift;
+}
+
+app.post('/api/shifts', h(async (req) => {
+  const staff = await getStaff(isStaffLogin(req) ? req.user.staff_id : req.body?.staff_id);
+  if (isStaffLogin(req) && !staff.active) throw new HttpError(403, 'Your staff record is inactive. Ask an admin.');
+  const v = validateShift(req.body);
+  const ws = weekStart(v.shift_date);
+  await assertWeekUnpaid(staff.id, ws);
+  return forViewer(req, await one(`
+    INSERT INTO shifts (staff_id, shift_date, start_time, end_time, break_minutes, minutes, rate_pence, week_start, note, created_by)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
+  `, [staff.id, v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, staff.rate_pence, ws, v.note, req.user.id]));
+}));
+
+app.put('/api/shifts/:id', h(async (req) => {
+  const old = await loadOwnShift(req);
+  await assertWeekUnpaid(old.staff_id, old.week_start);
+  const v = validateShift(req.body);
+  const ws = weekStart(v.shift_date);
+  await assertWeekUnpaid(old.staff_id, ws);
+  return forViewer(req, await one(`
+    UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7
+    WHERE id = $8 RETURNING *
+  `, [v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, ws, v.note, old.id]));
+}));
+
+app.delete('/api/shifts/:id', h(async (req) => {
+  const old = await loadOwnShift(req);
+  await assertWeekUnpaid(old.staff_id, old.week_start);
+  await query('DELETE FROM shifts WHERE id = $1', [old.id]);
+  return { ok: true };
+}));
+
+// ---- Admins only from here ----
+app.use('/api', requireAdmin);
+
+// ---- Logins ----
+app.get('/api/users', h(() => query(`
+  SELECT u.id, u.username, u.role, u.staff_id, st.name AS staff_name, u.must_change_password
+  FROM admin u LEFT JOIN staff st ON st.id = u.staff_id
+  ORDER BY u.role, u.username
+`)));
+
+app.post('/api/users', h(async (req) => {
+  const { password, role, staff_id } = req.body || {};
+  const username = cleanUsername(req.body?.username);
+  if (!USERNAME_RE.test(username)) throw bad('Username must be 3–32 characters: letters, numbers, dot, dash or underscore');
+  if (!password || String(password).length < 8) throw bad('Password must be at least 8 characters');
+  if (!['admin', 'staff'].includes(role)) throw bad('Choose Admin or Staff');
+  let staffId = null;
+  if (role === 'staff') {
+    staffId = (await getStaff(staff_id)).id;
+    if (await one("SELECT 1 FROM admin WHERE role = 'staff' AND staff_id = $1", [staffId])) throw bad('That staff member already has a login');
+  }
+  if (await one('SELECT 1 FROM admin WHERE username = $1', [username])) throw bad('That username is taken');
+  return one(`INSERT INTO admin (username, password_hash, role, staff_id) VALUES ($1, $2, $3, $4)
+              RETURNING id, username, role, staff_id`, [username, hashPassword(String(password)), role, staffId]);
+}));
+
+// Reset a login's password.
+app.put('/api/users/:id', h(async (req) => {
+  const u = await one('SELECT * FROM admin WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!u) throw new HttpError(404, 'Login not found');
+  const { password } = req.body || {};
+  if (!password || String(password).length < 8) throw bad('Password must be at least 8 characters');
+  await query('UPDATE admin SET password_hash = $1, must_change_password = FALSE WHERE id = $2', [hashPassword(String(password)), u.id]);
+  return { ok: true };
+}));
+
+app.delete('/api/users/:id', h(async (req) => {
+  const u = await one('SELECT * FROM admin WHERE id = $1', [Number(req.params.id) || 0]);
+  if (!u) throw new HttpError(404, 'Login not found');
+  if (u.id === req.user.id) throw bad("You can't remove your own login");
+  if (u.role === 'admin') {
+    const { n } = await one("SELECT COUNT(*)::int AS n FROM admin WHERE role = 'admin'");
+    if (n <= 1) throw bad('There must be at least one admin');
+  }
+  await query('DELETE FROM admin WHERE id = $1', [u.id]);
   return { ok: true };
 }));
 
@@ -182,54 +327,13 @@ app.get('/api/shifts', h(async (req) => {
     args.push(weekStart(week_start)); where.push(`s.week_start = $${args.length}`);
   }
   return query(`
-    SELECT s.*, st.name, (p.id IS NOT NULL) AS paid
+    SELECT s.*, st.name, (p.id IS NOT NULL) AS paid, cb.username AS created_by_name, cb.role AS created_by_role
     FROM shifts s JOIN staff st ON st.id = s.staff_id
     LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
+    LEFT JOIN admin cb ON cb.id = s.created_by
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY s.shift_date DESC, s.start_time DESC LIMIT 500
   `, args);
-}));
-
-function validateShift(body) {
-  const { shift_date, start_time, end_time, break_minutes = 0, note } = body || {};
-  if (!isValidDate(shift_date)) throw bad('Pick a valid date');
-  if (parseTime(start_time) === null || parseTime(end_time) === null) throw bad('Times must be HH:MM (24-hour)');
-  let minutes;
-  try { minutes = shiftMinutes(start_time, end_time, break_minutes); }
-  catch (e) { throw bad(e.message); }
-  return { shift_date, start_time, end_time, break_minutes: Number(break_minutes) || 0, minutes, note: note || null };
-}
-
-app.post('/api/shifts', h(async (req) => {
-  const staff = await getStaff(req.body?.staff_id);
-  const v = validateShift(req.body);
-  const ws = weekStart(v.shift_date);
-  await assertWeekUnpaid(staff.id, ws);
-  return one(`
-    INSERT INTO shifts (staff_id, shift_date, start_time, end_time, break_minutes, minutes, rate_pence, week_start, note)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
-  `, [staff.id, v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, staff.rate_pence, ws, v.note]);
-}));
-
-app.put('/api/shifts/:id', h(async (req) => {
-  const old = await one('SELECT * FROM shifts WHERE id = $1', [Number(req.params.id) || 0]);
-  if (!old) throw new HttpError(404, 'Shift not found');
-  await assertWeekUnpaid(old.staff_id, old.week_start);
-  const v = validateShift(req.body);
-  const ws = weekStart(v.shift_date);
-  await assertWeekUnpaid(old.staff_id, ws);
-  return one(`
-    UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7
-    WHERE id = $8 RETURNING *
-  `, [v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, ws, v.note, old.id]);
-}));
-
-app.delete('/api/shifts/:id', h(async (req) => {
-  const old = await one('SELECT * FROM shifts WHERE id = $1', [Number(req.params.id) || 0]);
-  if (!old) throw new HttpError(404, 'Shift not found');
-  await assertWeekUnpaid(old.staff_id, old.week_start);
-  await query('DELETE FROM shifts WHERE id = $1', [old.id]);
-  return { ok: true };
 }));
 
 // ---- Weeks & payments ----

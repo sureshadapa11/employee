@@ -6,6 +6,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 let CURRENCY = '£';
 let WEEK_START_DAY = 3; // set from server
 let staffList = [];
+let ME = null; // the logged-in user from /api/me
+const isStaff = () => ME?.role === 'staff';
 
 // Lucide-style line icons.
 const ICONS = {
@@ -27,6 +29,7 @@ const ICONS = {
   alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -137,10 +140,13 @@ function showLogin() {
 }
 
 function applyMe(me) {
+  ME = me;
+  document.body.classList.toggle('role-admin', me.role === 'admin');
+  document.body.classList.toggle('role-staff', me.role === 'staff');
   CURRENCY = me.currency;
   WEEK_START_DAY = me.week_start_day;
   $('#pw-banner').classList.toggle('hidden', !me.must_change_password);
-  $('#settings-info').textContent = `Signed in as ${me.username}. Weeks run ${DAY_NAMES[WEEK_START_DAY]} to ${DAY_NAMES[(WEEK_START_DAY + 6) % 7]}.`;
+  $('#settings-info').textContent = `Signed in as ${me.username} (${me.role === 'staff' ? 'staff' + (me.staff_name ? ', ' + me.staff_name : '') : 'admin'}). Weeks run ${DAY_NAMES[WEEK_START_DAY]} to ${DAY_NAMES[(WEEK_START_DAY + 6) % 7]}.`;
 }
 
 async function showApp() {
@@ -148,7 +154,9 @@ async function showApp() {
   $('#app-view').classList.remove('hidden');
   hoursWeek = weekStart(today());
   dashWeek = weekStart(today());
-  await loadStaff();
+  myWeek = weekStart(today());
+  if (isStaff()) selectedStaffId = 'self'; // the server always uses the staff login's own record
+  else await loadStaff();
   route();
 }
 
@@ -166,6 +174,8 @@ $('#login-form').addEventListener('submit', async (e) => {
 $('#logout').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' }).catch(() => {});
   history.replaceState(null, '', location.pathname);
+  ME = null;
+  document.body.classList.remove('role-admin', 'role-staff');
   showLogin();
 });
 
@@ -176,8 +186,10 @@ const VIEWS = {
   weeks: { title: 'Weeks', load: () => loadWeeks() },
   payments: { title: 'Payments', load: () => loadPayments() },
   staff: { title: 'Staff', load: () => renderStaff() },
-  settings: { title: 'Settings', load: () => {} },
+  settings: { title: 'Settings', load: () => { if (!isStaff()) loadLogins(); } },
+  my: { title: 'My hours', load: () => loadMy() },
 };
+const STAFF_VIEWS = ['my', 'add', 'settings'];
 
 function go(view) {
   if (location.hash === '#' + view) route();
@@ -187,7 +199,9 @@ function go(view) {
 function route() {
   if ($('#app-view').classList.contains('hidden')) return;
   if (sheet.open) closeSheet();
-  const name = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : 'home';
+  const allowed = (v) => VIEWS[v] && (isStaff() ? STAFF_VIEWS.includes(v) : v !== 'my');
+  const wanted = location.hash.slice(1);
+  const name = allowed(wanted) ? wanted : (isStaff() ? 'my' : 'home');
   $$('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   $$('main > section').forEach((s) => s.classList.toggle('hidden', s.dataset.view !== name));
   $('#view-title').textContent = name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
@@ -334,6 +348,8 @@ let selectedStaffId = null;
 let hoursWeek = null;
 
 function renderStaffChips() {
+  $('#staff-chips').closest('.group').classList.toggle('hidden', isStaff());
+  if (isStaff()) return;
   const active = staffList.filter((s) => s.active);
   if (!active.some((s) => String(s.id) === String(selectedStaffId))) selectedStaffId = active[0] ? String(active[0].id) : null;
   const editing = !!shiftForm.elements.edit_id.value;
@@ -428,16 +444,20 @@ async function loadHoursList() {
   $('#hours-title').textContent = weekName(hoursWeek);
   $('#hours-week').textContent = weekLabel(hoursWeek);
   if (!selectedStaffId) { $('#hours-list').innerHTML = ''; $('#hours-summary').innerHTML = ''; return; }
-  const shifts = await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`);
+  const showMoney = !isStaff();
+  const shifts = showMoney
+    ? await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`)
+    : (await api(`/my?week=${hoursWeek}`)).shifts;
   shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
   const total = shifts.reduce((t, s) => t + s.minutes, 0);
   const pay = shifts.reduce((t, s) => t + shiftPay(s), 0);
   const paid = shifts.some((s) => s.paid);
   const staff = staffList.find((x) => String(x.id) === String(selectedStaffId));
+  const who = isStaff() ? (ME.staff_name || 'You') : (staff?.name || '');
   $('#hours-summary').innerHTML = shifts.length ? `
     <div class="summary-bar">
-      <span>${esc(staff?.name || '')} · <strong>${hours(total)}</strong></span>
-      <span><strong>${money(pay)}</strong> ${statusBadge(paid)}</span>
+      <span>${esc(who)} · <strong>${hours(total)}</strong></span>
+      <span>${showMoney ? `<strong>${money(pay)}</strong> ` : ''}${statusBadge(paid)}</span>
     </div>` : '';
   $('#hours-list').innerHTML = shifts.length ? shifts.map((s) => {
     const d = utc(s.shift_date);
@@ -446,14 +466,14 @@ async function loadHoursList() {
       <div class="date-block"><div class="d">${DAYS[d.getUTCDay()]}</div><div class="n">${d.getUTCDate()}</div></div>
       <div class="item-main">
         <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
-        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''} · ${money(shiftPay(s))}${s.note ? ' · ' + esc(s.note) : ''}</span>
+        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${showMoney ? ' · ' + money(shiftPay(s)) : ''}${s.note ? ' · ' + esc(s.note) : ''}${showMoney && s.created_by_role === 'staff' ? ' · added by ' + esc(s.created_by_name) : ''}</span>
       </div>
       ${s.paid ? '' : `<div class="item-actions">
         <button class="icon-btn" data-edit='${esc(JSON.stringify(s))}' aria-label="Edit shift">${icon('pencil')}</button>
         <button class="icon-btn danger" data-del="${s.id}" aria-label="Delete shift">${icon('trash')}</button>
       </div>`}
     </div>`;
-  }).join('') : emptyState('calendar', `No shifts for ${esc(staff?.name || 'this person')} in this week.`);
+  }).join('') : emptyState('calendar', isStaff() ? 'No shifts in this week yet.' : `No shifts for ${esc(staff?.name || 'this person')} in this week.`);
 }
 
 $('#hours-switch').addEventListener('click', (e) => {
@@ -511,7 +531,7 @@ $('#hours-list').addEventListener('click', async (e) => {
     const s = JSON.parse(edit.dataset.edit);
     const f = shiftForm.elements;
     f.edit_id.value = s.id;
-    selectedStaffId = String(s.staff_id);
+    if (!isStaff()) selectedStaffId = String(s.staff_id);
     renderStaffChips();
     f.start_time.value = s.start_time; f.end_time.value = s.end_time;
     f.note.value = s.note || '';
@@ -688,6 +708,163 @@ $('#payments-list').addEventListener('click', async (e) => {
     await api('/payments/' + b.dataset.undo, { method: 'DELETE' });
     toast('Payment undone');
     loadPayments();
+  }
+});
+
+// ---------- my hours (staff logins) ----------
+let myWeek = null;
+
+async function loadMy() {
+  const d = await api(`/my?week=${myWeek}`);
+  myWeek = d.week_start;
+  const name = weekName(d.week_start);
+  $('#view-title').textContent = 'My hours';
+  $('#my-title').textContent = name;
+  $('#my-week').textContent = weekLabel(d.week_start);
+  $('#my-hours').textContent = hours(d.total_minutes);
+  $('#my-status').innerHTML = d.paid === null ? '' : statusBadge(d.paid).replace('class="badge', 'class="badge lg');
+  $('#my-shifts').innerHTML = d.shifts.length ? d.shifts.map((s) => {
+    const dt = utc(s.shift_date);
+    return `
+    <div class="item">
+      <div class="date-block"><div class="d">${DAYS[dt.getUTCDay()]}</div><div class="n">${dt.getUTCDate()}</div></div>
+      <div class="item-main">
+        <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
+        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${s.note ? ' · ' + esc(s.note) : ''}</span>
+      </div>
+    </div>`;
+  }).join('') : emptyState('calendar', 'No shifts in this week. Tap Add hours to enter one.');
+  $('#my-weeks').innerHTML = d.weeks.length ? d.weeks.map((w) => `
+    <button class="item" data-week="${w.week_start}">
+      <span class="item-main">
+        <span class="item-title">${weekName(w.week_start)}</span>
+        <span class="item-sub">${weekLabel(w.week_start)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}</span>
+      </span>
+      <span class="item-end">
+        <span class="item-amount">${hours(w.minutes)}</span>
+        ${statusBadge(w.paid)}
+      </span>
+    </button>`).join('') : emptyState('clock', 'No hours recorded yet.');
+}
+
+$('#my-switch').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-step]');
+  if (!b) return;
+  const step = Number(b.dataset.step);
+  myWeek = step === 0 ? weekStart(today()) : addDays(myWeek, step * 7);
+  loadMy();
+});
+$('#my-weeks').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-week]');
+  if (b) { myWeek = b.dataset.week; loadMy(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+});
+
+// ---------- logins (admins) ----------
+let loginsData = [];
+
+async function loadLogins() {
+  [loginsData] = await Promise.all([api('/users'), loadStaff()]);
+  $('#logins-list').innerHTML = loginsData.map((u) => `
+    <div class="item">
+      <span class="avatar ${u.role === 'admin' ? '' : 'off'}">${esc(initials(u.username))}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(u.username)}${u.username === ME.username ? ' <span class="badge neutral">You</span>' : ''}</span>
+        <span class="item-sub">${u.role === 'admin' ? 'Admin · full access' : 'Staff · ' + esc(u.staff_name || '')}</span>
+      </span>
+      <div class="item-actions">
+        <button class="icon-btn" data-reset="${u.id}" aria-label="Reset password for ${esc(u.username)}">${icon('key')}</button>
+        ${u.username === ME.username ? '' : `<button class="icon-btn danger" data-remove="${u.id}" aria-label="Remove login ${esc(u.username)}">${icon('trash')}</button>`}
+      </div>
+    </div>`).join('');
+}
+
+function openLoginSheet() {
+  const taken = new Set(loginsData.filter((u) => u.staff_id).map((u) => u.staff_id));
+  const free = staffList.filter((s) => s.active && !taken.has(s.id));
+  const body = openSheet(`
+    <form class="sheet-form" id="login-form-new" novalidate>
+      <h3>Add login</h3>
+      <div class="segmented" id="login-role">
+        <button type="button" data-role="staff" class="active">Staff</button>
+        <button type="button" data-role="admin">Admin</button>
+      </div>
+      <p class="hint" id="login-role-hint">Staff can add their own hours and see their own hours. No pay or rates.</p>
+      <label class="field" id="login-staff-field"><span>Staff member</span>
+        <select name="staff_id" class="input select">${free.length ? free.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('') : '<option value="">Everyone already has a login</option>'}</select>
+      </label>
+      <label class="field"><span>Username</span><input name="username" class="input" autocapitalize="none" autocomplete="off" spellcheck="false" required></label>
+      <label class="field"><span>Password (min 8 characters)</span><input name="password" class="input" type="text" autocomplete="off" minlength="8" required></label>
+      <p class="error" id="login-new-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="login-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Create</button>
+      </div>
+    </form>`);
+  let role = 'staff';
+  const f = $('#login-form-new', body);
+  // Suggest a username from the staff member's first name.
+  const suggest = () => {
+    const s = staffList.find((x) => String(x.id) === f.elements.staff_id.value);
+    if (role === 'staff' && s && !f.elements.username.dataset.touched) f.elements.username.value = s.name.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+  };
+  suggest();
+  f.elements.staff_id.addEventListener('change', suggest);
+  f.elements.username.addEventListener('input', () => { f.elements.username.dataset.touched = '1'; });
+  $('#login-role', body).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-role]');
+    if (!b) return;
+    role = b.dataset.role;
+    $('#login-role button', body).forEach((x) => x.classList.toggle('active', x === b));
+    $('#login-staff-field', body).classList.toggle('hidden', role !== 'staff');
+    $('#login-role-hint', body).textContent = role === 'admin'
+      ? 'Admins have full access: all staff, hours, pay, payments and logins.'
+      : 'Staff can add their own hours and see their own hours. No pay or rates.';
+  });
+  $('#login-cancel', body).addEventListener('click', closeSheet);
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = { ...formData(f), role };
+    try {
+      await api('/users', { method: 'POST', body: data });
+      closeSheet();
+      toast(`Login created: ${data.username.trim().toLowerCase()}`);
+      loadLogins();
+    } catch (err) { $('#login-new-error').textContent = err.message; }
+  });
+}
+$('#add-login').addEventListener('click', openLoginSheet);
+
+$('#logins-list').addEventListener('click', async (e) => {
+  const reset = e.target.closest('[data-reset]');
+  const remove = e.target.closest('[data-remove]');
+  if (reset) {
+    const u = loginsData.find((x) => String(x.id) === reset.dataset.reset);
+    const body = openSheet(`
+      <form class="sheet-form" id="reset-form" novalidate>
+        <h3>Reset password</h3>
+        <p class="muted">New password for <strong>${esc(u.username)}</strong>. Give it to them; they can change it in Settings.</p>
+        <label class="field"><span>New password (min 8 characters)</span><input name="password" class="input" type="text" autocomplete="off" minlength="8" required></label>
+        <p class="error" id="reset-error" role="alert"></p>
+        <div class="sheet-actions">
+          <button type="button" class="btn ghost" id="reset-cancel">Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>`);
+    $('#reset-cancel', body).addEventListener('click', closeSheet);
+    $('#reset-form', body).addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try {
+        await api('/users/' + u.id, { method: 'PUT', body: formData(ev.target) });
+        closeSheet(); toast(`Password reset for ${u.username}`);
+      } catch (err) { $('#reset-error').textContent = err.message; }
+    });
+  }
+  if (remove) {
+    const u = loginsData.find((x) => String(x.id) === remove.dataset.remove);
+    if (await confirmSheet({ title: 'Remove login?', message: `${u.username} will no longer be able to sign in. Their hours stay saved.`, confirmText: 'Remove', danger: true })) {
+      try { await api('/users/' + u.id, { method: 'DELETE' }); toast('Login removed'); loadLogins(); }
+      catch (err) { toast(err.message); }
+    }
   }
 });
 

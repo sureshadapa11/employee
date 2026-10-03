@@ -361,3 +361,16 @@ dialog.sheet::backdrop { background: rgba(2, 6, 23, .5); }
   display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600;
   background: var(--danger-soft); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 }
+
+/* ---------- Role-based visibility ---------- */
+body:not(.role-admin) .admin-only,
+body:not(.role-staff) .staff-only { display: none !important; }
+body.role-staff .tabbar button:not(.staff-only):not(.tab-add) { display: none; }
+body.role-staff .tabbar { grid-template-columns: repeat(3, 1fr); }
+body.role-staff .tabbar button[data-view="my"] { order: -1; }
+body.role-staff .tabbar button[data-view="settings"] { order: 1; }
+body.role-staff #open-settings { display: none; }
+
+.hero.single { grid-template-columns: 1fr auto; }
+.badge.lg { font-size: 14px; padding: 6px 12px; }
+.badge.lg svg.icon { width: 16px; height: 16px; }
