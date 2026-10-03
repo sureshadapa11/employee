@@ -425,3 +425,16 @@ section[data-view="home"] > .hero:not(.due) .hero-divider { background: var(--bo
   background: var(--surface-2); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .tp-grid button.sel { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+
+/* ---------- Staff messages ---------- */
+.msg-line {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding: 8px 10px; border-radius: 10px;
+  background: var(--unpaid-soft); color: var(--text); font-size: 14px; white-space: normal; overflow-wrap: anywhere;
+}
+.msg-line svg.icon { width: 16px; height: 16px; color: var(--unpaid); margin-top: 2px; }
+.msg-card { flex-direction: column; align-items: stretch; gap: 10px; }
+.msg-card .row { display: flex; gap: 12px; align-items: center; }
+.msg-card .card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.msg-card .msg-line { margin-top: 0; }
+.notice { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--primary-soft); font-size: 14px; }
+.textarea { min-height: 96px; padding: 12px 14px; resize: vertical; line-height: 1.4; }

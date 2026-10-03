@@ -30,6 +30,7 @@ const ICONS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -324,8 +325,45 @@ async function loadDashboard() {
 // Pay-due card, last payday and overdue weeks. These always follow today's date,
 // not the week picked with the arrows above.
 let dashData = null;
+function renderMessages(list) {
+  $('#messages-block').classList.toggle('hidden', !list.length);
+  $('#messages-list').innerHTML = list.map((m, i) => `
+    <div class="item msg-card">
+      <div class="row">
+        <span class="avatar">${esc(initials(m.name))}</span>
+        <span class="item-main">
+          <span class="item-title">${esc(m.name)}</span>
+          <span class="item-sub">${fmtDate(m.shift_date)} · ${m.start_time} – ${m.end_time} · ${hours(m.minutes)}</span>
+        </span>
+      </div>
+      ${messageLine(m)}
+      <div class="card-actions">
+        <button class="btn ghost sm" data-dismiss="${i}">Dismiss</button>
+        <button class="btn primary sm" data-fix="${i}">${icon('pencil')} Edit shift</button>
+      </div>
+    </div>`).join('');
+}
+
+$('#messages-list').addEventListener('click', async (e) => {
+  const fix = e.target.closest('[data-fix]');
+  const dismiss = e.target.closest('[data-dismiss]');
+  if (fix) {
+    pendingEdit = dashData.messages[fix.dataset.fix];
+    selectedStaffId = String(pendingEdit.staff_id);
+    hoursWeek = pendingEdit.week_start;
+    go('add');
+  }
+  if (dismiss) {
+    const m = dashData.messages[dismiss.dataset.dismiss];
+    await api(`/shifts/${m.id}/message`, { method: 'PUT', body: { text: '' } });
+    toast('Message dismissed');
+    loadDashboard();
+  }
+});
+
 function renderPayday(d) {
   dashData = d;
+  renderMessages(d.messages);
   const due = d.due;
   const when = due.is_today ? `<span class="badge today">Today</span>` : '';
   const rows = due.staff.map((r, i) => `
@@ -409,10 +447,58 @@ $('section[data-view="home"]').addEventListener('click', (e) => {
   }
 });
 
+// ---------- staff messages on shifts ----------
+const messageLine = (s) => (s.staff_note
+  ? `<span class="msg-line">${icon('message')}<span>${esc(s.staff_note)}</span></span>`
+  : '');
+
+// Staff can't change a submitted shift; they leave a message for an admin instead.
+function openMessageSheet(shift, onDone) {
+  const body = openSheet(`
+    <form class="sheet-form" id="msg-form" novalidate>
+      <h3>Message for admin</h3>
+      <p class="muted">${fmtDate(shift.shift_date)} · ${shift.start_time} – ${shift.end_time} · ${hours(shift.minutes)}</p>
+      <label class="field"><span>What should be changed?</span>
+        <textarea name="text" class="input textarea" rows="4" maxlength="500" placeholder="e.g. I finished at 07:00, not 06:00">${esc(shift.staff_note || '')}</textarea>
+      </label>
+      <p class="error" id="msg-error" role="alert"></p>
+      ${shift.staff_note ? '<button type="button" class="btn ghost block" id="msg-clear">Remove message</button>' : ''}
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="msg-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Send</button>
+      </div>
+    </form>`);
+  const send = async (text) => {
+    try {
+      await api(`/shifts/${shift.id}/message`, { method: 'PUT', body: { text } });
+      closeSheet();
+      toast(text ? 'Message sent to admin' : 'Message removed');
+      onDone();
+    } catch (err) { $('#msg-error').textContent = err.message; }
+  };
+  $('#msg-cancel', body).addEventListener('click', closeSheet);
+  $('#msg-clear', body)?.addEventListener('click', () => send(''));
+  $('#msg-form', body).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = e.target.elements.text.value.trim();
+    if (!text) { $('#msg-error').textContent = 'Type a message first'; return; }
+    send(text);
+  });
+  setTimeout(() => $('#msg-form textarea', body).focus(), 50);
+}
+
 // ---------- add hours ----------
 const shiftForm = $('#shift-form');
 let selectedStaffId = null;
 let hoursWeek = null;
+let submittedDays = new Set(); // staff logins: dates already submitted in the loaded week
+let pendingEdit = null; // shift to open for editing once the Add screen has loaded
+
+function checkDayTaken() {
+  const taken = isStaff() && submittedDays.has(shiftForm.elements.shift_date.value);
+  $('#day-taken').classList.toggle('hidden', !taken);
+  $('#shift-submit').disabled = taken;
+}
 
 function renderStaffChips() {
   $('#staff-chips').closest('.group').classList.toggle('hidden', isStaff());
@@ -438,6 +524,7 @@ function setDate(iso) {
   $$('#date-quick button').forEach((b) => b.classList.toggle('active', addDays(today(), Number(b.dataset.days)) === iso));
   if (iso && weekStart(iso) !== hoursWeek) { hoursWeek = weekStart(iso); loadHoursList(); }
   updatePreview();
+  checkDayTaken();
 }
 $('#date-quick').addEventListener('click', (e) => {
   const b = e.target.closest('[data-days]');
@@ -594,6 +681,7 @@ async function loadAdd() {
   renderStaffChips();
   setBreak(Number(shiftForm.elements.break_minutes.value) || 0);
   await loadHoursList();
+  if (pendingEdit) { startEdit(pendingEdit); pendingEdit = null; }
 }
 
 async function loadHoursList() {
@@ -607,6 +695,7 @@ async function loadHoursList() {
   shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
   seedPresets(shifts);
   renderPresets();
+  if (isStaff()) { submittedDays = new Set(shifts.map((x) => x.shift_date)); checkDayTaken(); }
   const total = shifts.reduce((t, s) => t + s.minutes, 0);
   const pay = shifts.reduce((t, s) => t + shiftPay(s), 0);
   const paid = shifts.some((s) => s.paid);
@@ -625,8 +714,11 @@ async function loadHoursList() {
       <div class="item-main">
         <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
         <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${showMoney ? ' · ' + money(shiftPay(s)) : ''}${s.note ? ' · ' + esc(s.note) : ''}${showMoney && s.created_by_role === 'staff' ? ' · added by ' + esc(s.created_by_name) : ''}</span>
+        ${messageLine(s)}
       </div>
-      ${s.paid ? '' : `<div class="item-actions">
+      ${isStaff()
+        ? `<div class="item-actions"><button class="icon-btn" data-msg='${esc(JSON.stringify(s))}' aria-label="Message admin about this shift">${icon('message')}</button></div>`
+        : s.paid ? '' : `<div class="item-actions">
         <button class="icon-btn" data-edit='${esc(JSON.stringify(s))}' aria-label="Edit shift">${icon('pencil')}</button>
         <button class="icon-btn danger" data-del="${s.id}" aria-label="Delete shift">${icon('trash')}</button>
       </div>`}
@@ -679,28 +771,32 @@ shiftForm.addEventListener('submit', async (e) => {
     if (!editing) setDate(addDays(data.shift_date, 1));
     await loadHoursList();
   } catch (err) { $('#shift-error').textContent = err.message; }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; checkDayTaken(); }
 });
 $('#shift-cancel').addEventListener('click', resetShiftForm);
+
+function startEdit(s) {
+  const f = shiftForm.elements;
+  f.edit_id.value = s.id;
+  selectedStaffId = String(s.staff_id);
+  renderStaffChips();
+  f.start_time.value = s.start_time; f.end_time.value = s.end_time;
+  f.note.value = s.note || '';
+  setBreak(s.break_minutes);
+  setDate(s.shift_date);
+  $('#shift-submit').textContent = 'Save changes';
+  $('#shift-cancel').classList.remove('hidden');
+  $('#view-title').textContent = 'Edit shift';
+  if (s.staff_note) toast(`Message: ${s.staff_note}`);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
 $('#hours-list').addEventListener('click', async (e) => {
   const edit = e.target.closest('[data-edit]');
   const del = e.target.closest('[data-del]');
-  if (edit) {
-    const s = JSON.parse(edit.dataset.edit);
-    const f = shiftForm.elements;
-    f.edit_id.value = s.id;
-    if (!isStaff()) selectedStaffId = String(s.staff_id);
-    renderStaffChips();
-    f.start_time.value = s.start_time; f.end_time.value = s.end_time;
-    f.note.value = s.note || '';
-    setBreak(s.break_minutes);
-    setDate(s.shift_date);
-    $('#shift-submit').textContent = 'Save changes';
-    $('#shift-cancel').classList.remove('hidden');
-    $('#view-title').textContent = 'Edit shift';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
+  if (edit) startEdit(JSON.parse(edit.dataset.edit));
+  const msg = e.target.closest('[data-msg]');
+  if (msg) openMessageSheet(JSON.parse(msg.dataset.msg), loadHoursList);
   if (del && await confirmSheet({ title: 'Delete shift?', message: 'This shift will be removed from the week.', confirmText: 'Delete', danger: true })) {
     try { await api('/shifts/' + del.dataset.del, { method: 'DELETE' }); toast('Shift deleted'); await loadHoursList(); }
     catch (err) { toast(err.message); }
@@ -892,7 +988,9 @@ async function loadMy() {
       <div class="item-main">
         <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
         <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${s.note ? ' · ' + esc(s.note) : ''}</span>
+        ${messageLine(s)}
       </div>
+      <div class="item-actions"><button class="icon-btn" data-msg='${esc(JSON.stringify(s))}' aria-label="Message admin about this shift">${icon('message')}</button></div>
     </div>`;
   }).join('') : emptyState('calendar', 'No shifts in this week. Tap Add hours to enter one.');
   $('#my-weeks').innerHTML = d.weeks.length ? d.weeks.map((w) => `
@@ -915,6 +1013,10 @@ $('#my-switch').addEventListener('click', (e) => {
   const step = Number(b.dataset.step);
   myWeek = step === 0 ? weekStart(today()) : addDays(myWeek, step * 7);
   loadMy();
+});
+$('#my-shifts').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-msg]');
+  if (b) openMessageSheet(JSON.parse(b.dataset.msg), loadMy);
 });
 $('#my-weeks').addEventListener('click', (e) => {
   const b = e.target.closest('[data-week]');

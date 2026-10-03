@@ -44,6 +44,10 @@
       <button class="banner hidden" id="pw-banner" onclick="location.hash='settings'"><i data-icon="alert"></i><span>You are using the default password. Tap to change it.</span></button>
       <!-- Home -->
       <section data-view="home">
+        <div id="messages-block" class="hidden">
+          <h2 class="section-title">Messages from staff</h2>
+          <div class="list" id="messages-list"></div>
+        </div>
         <div class="week-switch" id="dash-switch">
           <button class="icon-btn" data-step="-1" aria-label="Previous week"><i data-icon="chevronLeft"></i></button>
           <button class="week-switch-label" data-step="0" aria-label="Go to this week">
@@ -149,6 +153,7 @@
             <div class="preview-sub">Enter start and end times</div>
           </div>
 
+          <p class="notice hidden" id="day-taken">You've already submitted hours for this day. To change them, tap the message button on that shift below.</p>
           <p class="error" id="shift-error" role="alert"></p>
           <div class="form-actions">
             <button class="btn ghost hidden" type="button" id="shift-cancel">Cancel</button>

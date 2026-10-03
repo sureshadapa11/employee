@@ -169,7 +169,7 @@ app.get('/api/my', h(async (req) => {
   if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
   const ws = weekStart(req.query.week || localToday());
   const [shifts, weeks] = await Promise.all([
-    query(`SELECT s.id, s.shift_date, s.start_time, s.end_time, s.break_minutes, s.minutes, s.note, (p.id IS NOT NULL) AS paid
+    query(`SELECT s.id, s.shift_date, s.start_time, s.end_time, s.break_minutes, s.minutes, s.note, s.staff_note, (p.id IS NOT NULL) AS paid
            FROM shifts s LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
            WHERE s.staff_id = $1 AND s.week_start = $2 ORDER BY s.shift_date, s.start_time`, [staffId, ws]),
     query(`SELECT s.week_start, SUM(s.minutes)::int AS minutes, COUNT(*)::int AS shift_count, (p.id IS NOT NULL) AS paid
@@ -219,6 +219,9 @@ app.post('/api/shifts', h(async (req) => {
   const staff = await getStaff(isStaffLogin(req) ? req.user.staff_id : req.body?.staff_id);
   if (isStaffLogin(req) && !staff.active) throw new HttpError(403, 'Your staff record is inactive. Ask an admin.');
   const v = validateShift(req.body);
+  if (isStaffLogin(req) && await one('SELECT 1 FROM shifts WHERE staff_id = $1 AND shift_date = $2', [staff.id, v.shift_date])) {
+    throw bad('You have already submitted hours for this day. To change them, add a message for the admin on that shift.');
+  }
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(staff.id, ws);
   return forViewer(req, await one(`
@@ -227,22 +230,38 @@ app.post('/api/shifts', h(async (req) => {
   `, [staff.id, v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, staff.rate_pence, ws, v.note, req.user.id]));
 }));
 
+const SUBMITTED_LOCKED = "Submitted hours can't be changed. Add a message for the admin instead.";
+
 app.put('/api/shifts/:id', h(async (req) => {
+  if (isStaffLogin(req)) throw new HttpError(403, SUBMITTED_LOCKED);
   const old = await loadOwnShift(req);
   await assertWeekUnpaid(old.staff_id, old.week_start);
   const v = validateShift(req.body);
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(old.staff_id, ws);
   return forViewer(req, await one(`
-    UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7
+    UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7,
+      staff_note = NULL, staff_note_at = NULL
     WHERE id = $8 RETURNING *
   `, [v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, ws, v.note, old.id]));
 }));
 
 app.delete('/api/shifts/:id', h(async (req) => {
+  if (isStaffLogin(req)) throw new HttpError(403, SUBMITTED_LOCKED);
   const old = await loadOwnShift(req);
   await assertWeekUnpaid(old.staff_id, old.week_start);
   await query('DELETE FROM shifts WHERE id = $1', [old.id]);
+  return { ok: true };
+}));
+
+// A message on a shift asking an admin to correct it. Staff set it on their own
+// shifts (empty text clears it); an admin can dismiss it, and editing the shift clears it.
+app.put('/api/shifts/:id/message', h(async (req) => {
+  const shift = await loadOwnShift(req);
+  const text = String(req.body?.text || '').trim().slice(0, 500);
+  if (!isStaffLogin(req) && text) throw bad('Only staff can leave a message');
+  await query('UPDATE shifts SET staff_note = $1, staff_note_at = $2 WHERE id = $3',
+    [text || null, text ? new Date().toISOString() : null, shift.id]);
   return { ok: true };
 }));
 
@@ -377,9 +396,11 @@ app.get('/api/dashboard', h(async (req) => {
   const currentWeek = weekStart(localToday());
   if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
   const thisWeek = req.query.week ? weekStart(req.query.week) : currentWeek;
-  const [weeks, staff] = await Promise.all([
+  const [weeks, staff, messages] = await Promise.all([
     weeklySummary(),
     query('SELECT id, name, rate_pence, active FROM staff ORDER BY name'),
+    query(`SELECT s.*, st.name FROM shifts s JOIN staff st ON st.id = s.staff_id
+           WHERE s.staff_note IS NOT NULL ORDER BY s.staff_note_at`),
   ]);
   const perStaff = staff.map((s) => {
     const mine = weeks.filter((w) => w.staff_id === s.id);
@@ -428,6 +449,7 @@ app.get('/api/dashboard', h(async (req) => {
 
   return {
     today,
+    messages,
     due,
     last_payday: summarise(lastWs),
     overdue,
