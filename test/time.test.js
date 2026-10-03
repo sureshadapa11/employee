@@ -25,13 +25,14 @@ test('invalid times rejected', () => {
   assert.throws(() => shiftMinutes('9:00', '17:00'));
 });
 
-test('week starts on Tuesday', () => {
-  // 2026-09-29 is a Tuesday
-  assert.strictEqual(weekStart('2026-09-29'), '2026-09-29');
-  assert.strictEqual(weekStart('2026-10-03'), '2026-09-29'); // Saturday
-  assert.strictEqual(weekStart('2026-10-05'), '2026-09-29'); // Monday = last day
-  assert.strictEqual(weekStart('2026-10-06'), '2026-10-06'); // next Tuesday
-  assert.strictEqual(weekEnd('2026-09-30'), '2026-10-05');
+test('week starts on Wednesday and ends Tuesday', () => {
+  // 2026-09-30 is a Wednesday
+  assert.strictEqual(weekStart('2026-09-30'), '2026-09-30');
+  assert.strictEqual(weekStart('2026-10-03'), '2026-09-30'); // Saturday
+  assert.strictEqual(weekStart('2026-10-06'), '2026-09-30'); // Tuesday = last day
+  assert.strictEqual(weekStart('2026-10-07'), '2026-10-07'); // next Wednesday
+  assert.strictEqual(weekStart('2026-09-29'), '2026-09-23'); // previous Tuesday
+  assert.strictEqual(weekEnd('2026-10-01'), '2026-10-06');
 });
 
 test('date validation', () => {

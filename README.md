@@ -7,7 +7,7 @@ A small web app for recording staff working hours, calculating weekly pay, and t
 - **24-hour shifts**: enter `From` / `To` in 24h format (type `2200`, it becomes `22:00`).
 - **Overnight shifts**: if `To` is earlier than `From`, the shift crosses midnight (e.g. `22:00 → 06:00` = 8h). Same start and end = 24h.
 - **Breaks**: optional unpaid break minutes, deducted from the shift.
-- **Week runs Tuesday → Monday.** A shift belongs to the week of the day it *started*.
+- **Week runs Wednesday → Tuesday.** A shift belongs to the week of the day it *started*.
 - **Hourly rate per staff.** The rate is saved with each shift, so changing a rate later doesn't change past weeks.
 - **Weekly totals**: hours and amount per staff per week, marked **Paid** or **Unpaid**.
 - **Payments**: mark a week paid (date, method, note). Paid weeks are locked; undo the payment to edit them.
@@ -47,7 +47,7 @@ npm test
 ```
 server.js        Express API + static files
 lib/db.js        SQLite schema, admin account
-lib/time.js      Shift length, overnight handling, Tuesday week start
+lib/time.js      Shift length, overnight handling, Wednesday week start
 public/          Frontend (vanilla HTML/CSS/JS)
 test/            Unit tests for time calculations
 ```

@@ -36,7 +36,15 @@
     <main>
       <!-- Dashboard -->
       <section data-view="dashboard">
-        <h2>This week <span class="muted" id="dash-week"></span></h2>
+        <div class="week-bar">
+          <button class="btn arrow" id="dash-prev" aria-label="Previous week">&#8249;</button>
+          <div class="week-title">
+            <h2 id="dash-title">This week</h2>
+            <div class="muted" id="dash-week"></div>
+          </div>
+          <button class="btn arrow" id="dash-next" aria-label="Next week">&#8250;</button>
+          <button class="btn ghost small hidden" id="dash-today">Back to this week</button>
+        </div>
         <div class="stats" id="dash-stats"></div>
         <h3>By staff</h3>
         <div class="table-wrap"><table id="dash-table"></table></div>

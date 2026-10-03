@@ -27,7 +27,8 @@ const addDays = (iso, n) => {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
-const weekStart = (iso) => addDays(iso, -((new Date(iso + 'T00:00:00Z').getUTCDay() - 2 + 7) % 7)); // Tuesday
+let WEEK_START_DAY = 3; // set from server
+const weekStart = (iso) => addDays(iso, -((new Date(iso + 'T00:00:00Z').getUTCDay() - WEEK_START_DAY + 7) % 7));
 const weekLabel = (ws) => `${fmtDate(ws)} – ${fmtDate(addDays(ws, 6))}`;
 const parseTime = (t) => {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(t || '');
@@ -57,6 +58,8 @@ function showLogin() {
 async function showApp() {
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
+  hoursWeek = weekStart(today());
+  dashWeek = null;
   await loadStaff();
   showView('dashboard');
 }
@@ -67,7 +70,7 @@ $('#login-form').addEventListener('submit', async (e) => {
   try {
     await api('/login', { method: 'POST', body: formData(e.target) });
     const me = await api('/me');
-    CURRENCY = me.currency;
+    CURRENCY = me.currency; WEEK_START_DAY = me.week_start_day;
     e.target.reset();
     showApp();
   } catch (err) { $('#login-error').textContent = err.message; }
@@ -167,13 +170,32 @@ $('#staff-table').addEventListener('click', async (e) => {
 });
 
 // ---------- dashboard ----------
+let dashWeek = null; // null = current week
+
+function weekName(ws, current) {
+  const diff = Math.round((Date.parse(ws) - Date.parse(current)) / (7 * 864e5));
+  if (diff === 0) return 'This week';
+  if (diff === -1) return 'Last week';
+  if (diff === 1) return 'Next week';
+  return diff < 0 ? `${-diff} weeks ago` : `In ${diff} weeks`;
+}
+
 async function loadDashboard() {
-  const d = await api('/dashboard');
+  const d = await api('/dashboard' + (dashWeek ? `?week=${dashWeek}` : ''));
+  dashWeek = d.week_start;
+  const isCurrent = d.week_start === d.current_week_start;
+  const name = weekName(d.week_start, d.current_week_start);
+  $('#dash-title').textContent = name;
   $('#dash-week').textContent = weekLabel(d.week_start);
+  $('#dash-today').classList.toggle('hidden', isCurrent);
   const t = d.totals;
+  const weekStatus = (s) => {
+    if (s.this_week_paid === null) return '<span class="muted">–</span>';
+    return s.this_week_paid ? '<span class="badge paid">Paid</span>' : '<span class="badge unpaid">Unpaid</span>';
+  };
   $('#dash-stats').innerHTML = [
-    ['Hours this week', hours(t.this_week_minutes)],
-    ['Pay this week', money(t.this_week_pence)],
+    [`Hours · ${name.toLowerCase()}`, hours(t.this_week_minutes)],
+    [`Pay · ${name.toLowerCase()}`, money(t.this_week_pence)],
     ['Unpaid (owed)', money(t.unpaid_pence)],
     ['Paid (all time)', money(t.paid_pence)],
     ['Hours (all time)', hours(t.total_minutes)],
@@ -184,17 +206,22 @@ async function loadDashboard() {
       <td class="num">${money(s.rate_pence)}</td>
       <td class="num">${hours(s.this_week_minutes)}</td>
       <td class="num">${money(s.this_week_pence)}</td>
+      <td>${weekStatus(s)}</td>
       <td class="num">${hours(s.total_minutes)}</td>
       <td class="num">${money(s.paid_pence)}</td>
       <td class="num">${s.unpaid_pence ? `<span class="badge unpaid">${money(s.unpaid_pence)}</span> <span class="muted">${s.unpaid_weeks} wk</span>` : '<span class="badge paid">Nothing owed</span>'}</td>
     </tr>`).join('');
   $('#dash-table').innerHTML = `
-    <thead><tr><th>Staff</th><th class="num">Rate/h</th><th class="num">Hours this wk</th><th class="num">Pay this wk</th>
-      <th class="num">Total hours</th><th class="num">Total paid</th><th class="num">Unpaid</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="7" class="empty">No staff yet.</td></tr>'}</tbody>
-    ${d.staff.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${hours(t.this_week_minutes)}</td><td class="num">${money(t.this_week_pence)}</td>
+    <thead><tr><th>Staff</th><th class="num">Rate/h</th><th class="num">Hours (wk)</th><th class="num">Pay (wk)</th><th>Week status</th>
+      <th class="num">Total hours</th><th class="num">Total paid</th><th class="num">Unpaid (all)</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="8" class="empty">No staff yet.</td></tr>'}</tbody>
+    ${d.staff.length ? `<tfoot><tr><td>Total</td><td></td><td class="num">${hours(t.this_week_minutes)}</td><td class="num">${money(t.this_week_pence)}</td><td></td>
       <td class="num">${hours(t.total_minutes)}</td><td class="num">${money(t.paid_pence)}</td><td class="num">${money(t.unpaid_pence)}</td></tr></tfoot>` : ''}`;
 }
+
+$('#dash-prev').addEventListener('click', () => { dashWeek = addDays(dashWeek, -7); loadDashboard(); });
+$('#dash-next').addEventListener('click', () => { dashWeek = addDays(dashWeek, 7); loadDashboard(); });
+$('#dash-today').addEventListener('click', () => { dashWeek = null; loadDashboard(); });
 
 // ---------- hours ----------
 let hoursWeek = weekStart(today());
@@ -347,7 +374,7 @@ function renderWeeks() {
   const sum = (k) => list.reduce((t, w) => t + (w[k] || 0), 0);
   const unpaidTotal = list.filter((w) => !w.paid).reduce((t, w) => t + w.amount_pence, 0);
   $('#weeks-table').innerHTML = `
-    <thead><tr><th>Week (Tue–Mon)</th><th>Staff</th><th class="num">Shifts</th><th class="num">Hours</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Week (Wed–Tue)</th><th>Staff</th><th class="num">Shifts</th><th class="num">Hours</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows || '<tr><td colspan="7" class="empty">No weeks to show.</td></tr>'}</tbody>
     ${list.length ? `<tfoot><tr><td colspan="3">Total · unpaid ${money(unpaidTotal)}</td><td class="num">${hours(sum('minutes'))}</td>
       <td class="num">${money(list.reduce((t, w) => t + (w.paid ? w.paid_pence : w.amount_pence), 0))}</td><td colspan="2"></td></tr></tfoot>` : ''}`;
@@ -447,4 +474,4 @@ $('#pw-form').addEventListener('submit', async (e) => {
 });
 
 // ---------- start ----------
-api('/me').then((me) => { CURRENCY = me.currency; showApp(); }).catch(() => showLogin());
+api('/me').then((me) => { CURRENCY = me.currency; WEEK_START_DAY = me.week_start_day; showApp(); }).catch(() => showLogin());

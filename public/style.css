@@ -88,6 +88,10 @@ input.time { font-variant-numeric: tabular-nums; letter-spacing: 1px; }
 
 .filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .week-nav { display: flex; gap: 8px; margin-bottom: 10px; }
+.week-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 16px; }
+.week-title { text-align: center; min-width: 230px; }
+.week-title h2 { margin: 0; }
+.btn.arrow { font-size: 26px; line-height: 1; width: 44px; height: 44px; padding: 0; border-radius: 50%; }
 
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
 table { width: 100%; border-collapse: collapse; }

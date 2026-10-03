@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const { db, hashPassword, verifyPassword } = require('./lib/db');
-const { isValidDate, parseTime, shiftMinutes, weekStart, weekEnd } = require('./lib/time');
+const { WEEK_START_DAY, isValidDate, parseTime, shiftMinutes, weekStart, weekEnd } = require('./lib/time');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -93,7 +93,7 @@ app.post('/api/logout', h((req) => { req.session.destroy(() => {}); return { ok:
 
 app.get('/api/me', requireAdmin, h((req) => {
   const a = db.prepare('SELECT username FROM admin WHERE id = ?').get(req.session.adminId);
-  return { username: a.username, currency: CURRENCY };
+  return { username: a.username, currency: CURRENCY, week_start_day: WEEK_START_DAY };
 }));
 
 app.post('/api/change-password', requireAdmin, h((req) => {
@@ -204,7 +204,7 @@ app.post('/api/payments', h((req) => {
   if (!isValidDate(week_start)) throw bad('Invalid week');
   const ws = weekStart(week_start);
   if (weekPayment(staff.id, ws)) throw bad(`Week starting ${ws} is already paid`);
-  const paidOn = paid_on || new Date().toISOString().slice(0, 10);
+  const paidOn = paid_on || localToday();
   if (!isValidDate(paidOn)) throw bad('Invalid payment date');
   const week = weeklySummary(staff.id).find((w) => w.week_start === ws);
   if (!week) throw bad('No hours recorded for that week');
@@ -230,8 +230,17 @@ app.get('/api/payments', h((req) => {
   `).all(...(staff_id ? [Number(staff_id)] : [])).map((p) => ({ ...p, week_end: weekEnd(p.week_start) }));
 }));
 
-app.get('/api/dashboard', h(() => {
-  const thisWeek = weekStart(new Date().toISOString().slice(0, 10));
+// Today's date in the server's local time zone.
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// ?week=YYYY-MM-DD picks the week shown in the per-week columns (defaults to this week).
+app.get('/api/dashboard', h((req) => {
+  const currentWeek = weekStart(localToday());
+  if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
+  const thisWeek = req.query.week ? weekStart(req.query.week) : currentWeek;
   const weeks = weeklySummary();
   const perStaff = db.prepare('SELECT id, name, rate_pence, active FROM staff ORDER BY name').all().map((s) => {
     const mine = weeks.filter((w) => w.staff_id === s.id);
@@ -246,12 +255,14 @@ app.get('/api/dashboard', h(() => {
       unpaid_weeks: unpaid.length,
       this_week_minutes: current ? current.minutes : 0,
       this_week_pence: current ? current.amount_pence : 0,
+      this_week_paid: current ? current.paid : null,
     };
   });
   const total = (k) => perStaff.reduce((t, s) => t + s[k], 0);
   return {
     week_start: thisWeek,
     week_end: weekEnd(thisWeek),
+    current_week_start: currentWeek,
     totals: {
       total_minutes: total('total_minutes'),
       paid_pence: total('paid_pence'),
