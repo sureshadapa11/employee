@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Staff Hours</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Login -->
+  <section id="login-view" class="login hidden">
+    <form id="login-form" class="card login-card">
+      <h1>Staff Hours</h1>
+      <label>Username <input name="username" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="error" id="login-error"></p>
+      <button class="btn primary" type="submit">Log in</button>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app-view" class="hidden">
+    <header class="topbar">
+      <strong class="brand">Staff Hours</strong>
+      <nav id="nav">
+        <button data-view="dashboard" class="active">Dashboard</button>
+        <button data-view="hours">Add Hours</button>
+        <button data-view="weeks">Weeks</button>
+        <button data-view="payments">Payments</button>
+        <button data-view="staff">Staff</button>
+        <button data-view="settings">Settings</button>
+      </nav>
+      <button id="logout" class="btn ghost small">Log out</button>
+    </header>
+
+    <main>
+      <!-- Dashboard -->
+      <section data-view="dashboard">
+        <h2>This week <span class="muted" id="dash-week"></span></h2>
+        <div class="stats" id="dash-stats"></div>
+        <h3>By staff</h3>
+        <div class="table-wrap"><table id="dash-table"></table></div>
+      </section>
+
+      <!-- Add hours -->
+      <section data-view="hours" class="hidden">
+        <h2>Add hours</h2>
+        <form id="shift-form" class="card form-grid">
+          <input type="hidden" name="id">
+          <label>Staff <select name="staff_id" required></select></label>
+          <label>Date (shift start) <input name="shift_date" type="date" required></label>
+          <label>From (24h) <input name="start_time" class="time" placeholder="22:00" inputmode="numeric" maxlength="5" required></label>
+          <label>To (24h) <input name="end_time" class="time" placeholder="06:00" inputmode="numeric" maxlength="5" required></label>
+          <label>Break (minutes) <input name="break_minutes" type="number" min="0" step="5" value="0"></label>
+          <label class="wide">Note <input name="note" placeholder="optional"></label>
+          <p class="preview wide" id="shift-preview"></p>
+          <p class="error wide" id="shift-error"></p>
+          <div class="wide actions">
+            <button class="btn primary" type="submit" id="shift-submit">Save shift</button>
+            <button class="btn ghost hidden" type="button" id="shift-cancel">Cancel edit</button>
+          </div>
+        </form>
+        <h3>Shifts in week <span class="muted" id="hours-week"></span></h3>
+        <div class="week-nav">
+          <button class="btn ghost small" id="hours-prev">&larr; Prev week</button>
+          <button class="btn ghost small" id="hours-next">Next week &rarr;</button>
+        </div>
+        <div class="table-wrap"><table id="hours-table"></table></div>
+      </section>
+
+      <!-- Weeks -->
+      <section data-view="weeks" class="hidden">
+        <h2>Weekly totals</h2>
+        <div class="filters">
+          <label>Staff <select id="weeks-staff"></select></label>
+          <label>Show <select id="weeks-status">
+            <option value="">All</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="paid">Paid</option>
+          </select></label>
+        </div>
+        <div class="table-wrap"><table id="weeks-table"></table></div>
+      </section>
+
+      <!-- Payments -->
+      <section data-view="payments" class="hidden">
+        <h2>Payment history</h2>
+        <div class="filters">
+          <label>Staff <select id="payments-staff"></select></label>
+        </div>
+        <div class="stats" id="payments-stats"></div>
+        <div class="table-wrap"><table id="payments-table"></table></div>
+      </section>
+
+      <!-- Staff -->
+      <section data-view="staff" class="hidden">
+        <h2>Staff</h2>
+        <form id="staff-form" class="card form-grid">
+          <input type="hidden" name="id">
+          <label>Name <input name="name" required></label>
+          <label>Phone <input name="phone"></label>
+          <label>Hourly rate <input name="rate" type="number" min="0" step="0.01" required></label>
+          <p class="error wide" id="staff-error"></p>
+          <p class="muted wide small-text">Changing the rate only affects shifts added from now on.</p>
+          <div class="wide actions">
+            <button class="btn primary" type="submit" id="staff-submit">Add staff</button>
+            <button class="btn ghost hidden" type="button" id="staff-cancel">Cancel edit</button>
+          </div>
+        </form>
+        <div class="table-wrap"><table id="staff-table"></table></div>
+      </section>
+
+      <!-- Settings -->
+      <section data-view="settings" class="hidden">
+        <h2>Change password</h2>
+        <form id="pw-form" class="card form-grid">
+          <label>Current password <input name="current" type="password" required></label>
+          <label>New password <input name="next" type="password" minlength="6" required></label>
+          <p class="error wide" id="pw-msg"></p>
+          <div class="wide actions"><button class="btn primary" type="submit">Update password</button></div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- Pay dialog -->
+  <dialog id="pay-dialog">
+    <form id="pay-form" method="dialog" class="form-grid">
+      <h3 class="wide">Mark week as paid</h3>
+      <p class="wide" id="pay-summary"></p>
+      <input type="hidden" name="staff_id">
+      <input type="hidden" name="week_start">
+      <label>Paid on <input name="paid_on" type="date" required></label>
+      <label>Method <select name="method">
+        <option>Cash</option>
+        <option>Bank transfer</option>
+        <option>Other</option>
+      </select></label>
+      <label class="wide">Note <input name="note" placeholder="optional"></label>
+      <p class="error wide" id="pay-error"></p>
+      <div class="wide actions">
+        <button class="btn primary" value="confirm" id="pay-confirm">Confirm payment</button>
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
