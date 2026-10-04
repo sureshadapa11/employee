@@ -382,8 +382,8 @@ body.role-staff #payments-staff { display: none; }
 .badge.lg svg.icon { width: 16px; height: 16px; }
 
 /* ---------- Payday cards ---------- */
-/* The current week becomes a soft card so the pay-due card is the main blue one. */
-section[data-view="home"] > .hero:not(.due) { background: var(--primary-soft); color: var(--text); }
+/* The current week is a plain white card so the pay-due card is the only strong blue one (60-30-10). */
+section[data-view="home"] > .hero:not(.due) { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); }
 section[data-view="home"] > .hero:not(.due) .hero-label { color: var(--muted); }
 section[data-view="home"] > .hero:not(.due) .hero-divider { background: var(--border); }
 
