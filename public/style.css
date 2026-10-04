@@ -480,3 +480,17 @@ body.role-staff #open-notifications { display: inline-grid; }
 .login-icon { background: var(--primary); color: var(--accent); }
 .notice { background: var(--accent-soft); }
 .chip[aria-checked="true"] { box-shadow: inset 0 -3px 0 var(--accent); }
+
+/* ---------- Blue header with a thin yellow line ---------- */
+.appbar {
+  background: var(--hero-bg); color: var(--hero-ink);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border-bottom: 3px solid var(--accent);
+  margin-bottom: 12px;
+}
+.appbar .icon-btn {
+  background: color-mix(in srgb, var(--hero-ink) 12%, transparent);
+  border: 0; box-shadow: none; color: var(--hero-ink);
+}
+.appbar .icon-btn:active { background: color-mix(in srgb, var(--hero-ink) 22%, transparent); }
+.appbar .bell-count { border-color: var(--hero-bg); }
