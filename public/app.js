@@ -369,32 +369,41 @@ $('#messages-list').addEventListener('click', async (e) => {
 function renderPayday(d) {
   dashData = d;
   renderMessages(d.messages);
+  // Everything to pay, oldest first: overdue weeks, then the week due on the next payday.
   const due = d.due;
-  const when = due.is_today ? `<span class="badge today">Today</span>` : '';
-  const rows = due.staff.map((r, i) => `
-    <div class="due-row">
-      <span class="item-main">
-        <span class="item-title">${esc(r.name)}</span>
-        <span class="item-sub">${hours(r.minutes)}</span>
-      </span>
-      <span class="amt">${money(r.amount_pence)}</span>
-      ${r.paid ? statusBadge(true) : `<button class="btn sm" data-pay-due="${i}">Mark paid</button>`}
-    </div>`).join('');
+  const groups = [];
+  for (const w of [...d.overdue].sort((x, y) => x.week_start.localeCompare(y.week_start))) {
+    let g = groups.find((x) => x.week_start === w.week_start);
+    if (!g) groups.push(g = { week_start: w.week_start, payday: w.payday, overdue: true, rows: [] });
+    g.rows.push({ ...w, paid: false, src: 'overdue', idx: d.overdue.indexOf(w) });
+  }
+  groups.push({ week_start: due.week_start, payday: due.payday, overdue: false, rows: due.staff.map((r, i) => ({ ...r, src: 'due', idx: i })) });
+  const unpaidRows = groups.flatMap((g) => g.rows.filter((r) => !r.paid));
+  const toPay = unpaidRows.reduce((t, r) => t + r.amount_pence, 0);
+  const toPayMins = unpaidRows.reduce((t, r) => t + r.minutes, 0);
+  const section = (g) => `
+    <div class="due-section">
+      <div class="due-week">${g.overdue
+        ? `<span class="badge overdue-badge">Overdue</span> was due ${fmtDate(g.payday)}`
+        : `Due ${fmtDate(g.payday)}${due.is_today ? ' <span class="badge today">Today</span>' : ''}`} · week ${weekLabel(g.week_start)}</div>
+      ${g.rows.length ? `<div class="due-rows">${g.rows.map((r) => `
+        <div class="due-row">
+          <span class="item-main">
+            <span class="item-title">${esc(r.name)}</span>
+            <span class="item-sub">${hours(r.minutes)}</span>
+          </span>
+          <span class="amt">${money(r.amount_pence)}</span>
+          ${r.paid ? statusBadge(true) : `<button class="btn sm" data-pay-${r.src}="${r.idx}">Mark paid</button>`}
+        </div>`).join('')}</div>` : '<div class="due-empty">No hours recorded for that week.</div>'}
+    </div>`;
   $('#due-card').innerHTML = `
     <div class="due">
-      <div class="due-head">
-        <div>
-          <div class="due-kicker">Pay due</div>
-          <div class="due-payday">${fmtDate(due.payday)} ${when}</div>
-          <div class="due-week">For week ${weekLabel(due.week_start)}</div>
-        </div>
+      <div>
+        <div class="due-kicker">Pay due${d.overdue.length ? ' · includes overdue' : ''}</div>
+        <div class="due-payday">${toPay ? money(toPay) : 'All paid'}</div>
+        <div class="due-week">${toPay ? `${hours(toPayMins)} · ${unpaidRows.length} payment${unpaidRows.length > 1 ? 's' : ''} to make` : `Next payday ${fmtDate(due.payday)}`}</div>
       </div>
-      ${due.staff.length ? `
-        <div class="due-totals">
-          <div><div class="hero-label">Hours</div><div class="hero-value">${hours(due.minutes)}</div></div>
-          <div><div class="hero-label">${due.unpaid_pence ? 'To pay' : 'Paid'}</div><div class="hero-value">${money(due.unpaid_pence || due.amount_pence)}</div></div>
-        </div>
-        <div class="due-rows">${rows}</div>` : '<div class="due-empty">No hours recorded for that week.</div>'}
+      ${groups.map(section).join('')}
     </div>`;
 
   const last = d.last_payday;
@@ -404,10 +413,10 @@ function renderPayday(d) {
       <div class="row"><span class="muted">Last payday · ${fmtDate(last.payday)}</span><span class="big">${money(last.paid_pence)}</span></div>
       <div class="row"><span class="item-sub">Week ${weekLabel(last.week_start)}</span>
         <span class="item-sub">${paidCount} of ${last.staff.length} paid</span></div>
-      ${last.unpaid_pence ? `<div class="item-sub" style="color:var(--unpaid)">${money(last.unpaid_pence)} not paid yet, see Overdue</div>` : ''}
+      ${last.unpaid_pence ? `<div class="item-sub" style="color:var(--unpaid)">${money(last.unpaid_pence)} not paid yet, shown in Pay due above</div>` : ''}
     </div>` : '';
 
-  $('#overdue-block').classList.toggle('hidden', !d.overdue.length);
+  $('#overdue-block').classList.add('hidden');
   $('#overdue-list').innerHTML = d.overdue.map((w, i) => `
     <div class="item overdue">
       <span class="avatar">${esc(initials(w.name))}</span>
@@ -423,6 +432,8 @@ function renderPayday(d) {
 $('#due-card').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pay-due]');
   if (b) openPaySheet(dashData.due.staff[b.dataset.payDue], loadDashboard);
+  const o = e.target.closest('[data-pay-overdue]');
+  if (o) openPaySheet(dashData.overdue[o.dataset.payOverdue], loadDashboard);
 });
 $('#overdue-list').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pay-overdue]');
