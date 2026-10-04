@@ -272,7 +272,7 @@ app.get('/api/me', h(async (req) => {
   const u = req.user;
   const staff = u.staff_id ? await one('SELECT name FROM staff WHERE id = $1', [u.staff_id]) : null;
   return {
-    username: u.username, role: u.role, staff_name: staff ? staff.name : null,
+    username: u.username, role: u.role, staff_id: u.staff_id, staff_name: staff ? staff.name : null,
     must_change_password: u.must_change_password, currency: CURRENCY, week_start_day: WEEK_START_DAY,
   };
 }));
@@ -284,33 +284,6 @@ app.post('/api/change-password', h(async (req) => {
   if (!next || String(next).length < 8) throw bad('New password must be at least 8 characters');
   await query('UPDATE admin SET password_hash = $1, must_change_password = FALSE WHERE id = $2', [hashPassword(String(next)), a.id]);
   return { ok: true };
-}));
-
-// A staff login's own hours for one week, plus recent weeks. Hours only: no rates or money.
-app.get('/api/my', h(async (req) => {
-  const staffId = req.user.staff_id;
-  if (!staffId) throw new HttpError(403, 'This login is not linked to a staff member');
-  if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
-  const ws = weekStart(req.query.week || localToday());
-  const [shifts, weeks] = await Promise.all([
-    query(`SELECT s.id, s.shift_date, s.start_time, s.end_time, s.break_minutes, s.minutes, s.note, s.staff_note, (p.id IS NOT NULL) AS paid
-           FROM shifts s LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
-           WHERE s.staff_id = $1 AND s.week_start = $2 ORDER BY s.shift_date, s.start_time`, [staffId, ws]),
-    query(`SELECT s.week_start, SUM(s.minutes)::int AS minutes, COUNT(*)::int AS shift_count, (p.id IS NOT NULL) AS paid
-           FROM shifts s LEFT JOIN payments p ON p.staff_id = s.staff_id AND p.week_start = s.week_start
-           WHERE s.staff_id = $1 GROUP BY s.week_start, p.id ORDER BY s.week_start DESC LIMIT 12`, [staffId]),
-  ]);
-  const thisWeek = weeks.find((w) => w.week_start === ws);
-  return {
-    week_start: ws,
-    week_end: weekEnd(ws),
-    payday: payday(ws),
-    current_week_start: weekStart(localToday()),
-    shifts,
-    total_minutes: shifts.reduce((t, s) => t + s.minutes, 0),
-    paid: thisWeek ? thisWeek.paid : null,
-    weeks: weeks.map((w) => ({ ...w, week_end: weekEnd(w.week_start), payday: payday(w.week_start) })),
-  };
 }));
 
 // ---- Adding and changing shifts (admins: anyone's; staff: only their own) ----
@@ -326,12 +299,6 @@ function validateShift(body) {
 
 const isStaffLogin = (req) => req.user.role === 'staff';
 
-// Staff never see rates, so strip them from what we send back.
-const forViewer = (req, shift) => {
-  if (!isStaffLogin(req)) return shift;
-  const { rate_pence, ...rest } = shift;
-  return rest;
-};
 
 async function loadOwnShift(req) {
   const shift = await one('SELECT * FROM shifts WHERE id = $1', [Number(req.params.id) || 0]);
@@ -356,7 +323,7 @@ app.post('/api/shifts', h(async (req) => {
   if (isStaffLogin(req)) {
     await notify(await adminIds(), { kind: 'shift', title: `${staff.name} added hours`, body: shiftText(shift), link: 'weeks' });
   }
-  return forViewer(req, shift);
+  return shift;
 }));
 
 const SUBMITTED_LOCKED = "Submitted hours can't be changed. Add a message for the admin instead.";
@@ -377,10 +344,10 @@ app.put('/api/shifts/:id', h(async (req) => {
   const changed = ['shift_date', 'start_time', 'end_time', 'break_minutes'].some((k) => old[k] !== shift[k]);
   if (changed || old.staff_note) {
     await notify(await staffLoginIds(old.staff_id), {
-      kind: 'shift-updated', title: 'Your shift was updated', body: `Now ${shiftText(shift)}`, link: 'my',
+      kind: 'shift-updated', title: 'Your shift was updated', body: `Now ${shiftText(shift)}`, link: 'weeks',
     });
   }
-  return forViewer(req, shift);
+  return shift;
 }));
 
 app.delete('/api/shifts/:id', h(async (req) => {
@@ -389,7 +356,7 @@ app.delete('/api/shifts/:id', h(async (req) => {
   await assertWeekUnpaid(old.staff_id, old.week_start);
   await query('DELETE FROM shifts WHERE id = $1', [old.id]);
   await notify(await staffLoginIds(old.staff_id), {
-    kind: 'shift-updated', title: 'A shift was removed', body: shiftText(old), link: 'my',
+    kind: 'shift-updated', title: 'A shift was removed', body: shiftText(old), link: 'weeks',
   });
   return { ok: true };
 }));
@@ -409,8 +376,13 @@ app.put('/api/shifts/:id/message', h(async (req) => {
   return { ok: true };
 }));
 
-// ---- Admins only from here ----
-app.use('/api', requireAdmin);
+// ---- Admins only from here, except these read-only screens, which staff can
+// open for their own data (scopedStaffId below forces their own staff id). ----
+const STAFF_READABLE = ['/staff', '/shifts', '/weeks', '/payments', '/dashboard'];
+app.use('/api', (req, res, next) => (
+  isStaffLogin(req) && req.method === 'GET' && STAFF_READABLE.includes(req.path) ? next() : requireAdmin(req, res, next)
+));
+const scopedStaffId = (req, requested) => (isStaffLogin(req) ? req.user.staff_id : requested);
 
 // ---- Logins ----
 app.get('/api/users', h(() => query(`
@@ -458,7 +430,9 @@ app.delete('/api/users/:id', h(async (req) => {
 }));
 
 // ---- Staff ----
-app.get('/api/staff', h(() => query('SELECT * FROM staff ORDER BY active DESC, name')));
+app.get('/api/staff', h((req) => (isStaffLogin(req)
+  ? query('SELECT * FROM staff WHERE id = $1', [req.user.staff_id])
+  : query('SELECT * FROM staff ORDER BY active DESC, name'))));
 
 app.post('/api/staff', h(async (req) => {
   const { name, phone, rate } = req.body || {};
@@ -482,7 +456,8 @@ app.put('/api/staff/:id', h(async (req) => {
 
 // ---- Shifts ----
 app.get('/api/shifts', h(async (req) => {
-  const { staff_id, week_start } = req.query;
+  const { week_start } = req.query;
+  const staff_id = scopedStaffId(req, req.query.staff_id);
   const where = [];
   const args = [];
   if (staff_id) { args.push(Number(staff_id)); where.push(`s.staff_id = $${args.length}`); }
@@ -501,7 +476,7 @@ app.get('/api/shifts', h(async (req) => {
 }));
 
 // ---- Weeks & payments ----
-app.get('/api/weeks', h((req) => weeklySummary(req.query.staff_id)));
+app.get('/api/weeks', h((req) => weeklySummary(scopedStaffId(req, req.query.staff_id))));
 
 app.post('/api/payments', h(async (req) => {
   const { staff_id, week_start, paid_on, method, note } = req.body || {};
@@ -517,9 +492,8 @@ app.post('/api/payments', h(async (req) => {
     INSERT INTO payments (staff_id, week_start, minutes, amount_pence, paid_on, method, note)
     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
   `, [staff.id, ws, week.minutes, week.amount_pence, paidOn, method || null, note || null]);
-  // Staff see hours only, so no amount in their notification.
-  await notify(await staffLoginIds(staff.id), {
-    kind: 'paid', title: "You've been paid", body: `Week ${fmtDay(ws)} – ${fmtDay(weekEnd(ws))} · ${fmtHours(week.minutes)}`, link: 'my',
+    await notify(await staffLoginIds(staff.id), {
+    kind: 'paid', title: `You've been paid ${fmtMoney(week.amount_pence)}`, body: `Week ${fmtDay(ws)} – ${fmtDay(weekEnd(ws))} · ${fmtHours(week.minutes)}`, link: 'payments',
   });
   return payment;
 }));
@@ -531,7 +505,7 @@ app.delete('/api/payments/:id', h(async (req) => {
 }));
 
 app.get('/api/payments', h(async (req) => {
-  const { staff_id } = req.query;
+  const staff_id = scopedStaffId(req, req.query.staff_id);
   const rows = await query(`
     SELECT p.*, st.name FROM payments p JOIN staff st ON st.id = p.staff_id
     ${staff_id ? 'WHERE p.staff_id = $1' : ''}
@@ -545,10 +519,13 @@ app.get('/api/dashboard', h(async (req) => {
   const currentWeek = weekStart(localToday());
   if (req.query.week && !isValidDate(req.query.week)) throw bad('Invalid week');
   const thisWeek = req.query.week ? weekStart(req.query.week) : currentWeek;
+  const own = scopedStaffId(req, null);
   const [weeks, staff, messages] = await Promise.all([
-    weeklySummary(),
-    query('SELECT id, name, rate_pence, active FROM staff ORDER BY name'),
-    query(`SELECT s.*, st.name FROM shifts s JOIN staff st ON st.id = s.staff_id
+    weeklySummary(own),
+    own
+      ? query('SELECT id, name, rate_pence, active FROM staff WHERE id = $1', [own])
+      : query('SELECT id, name, rate_pence, active FROM staff ORDER BY name'),
+    own ? [] : query(`SELECT s.*, st.name FROM shifts s JOIN staff st ON st.id = s.staff_id
            WHERE s.staff_note IS NOT NULL ORDER BY s.staff_note_at`),
   ]);
   const perStaff = staff.map((s) => {

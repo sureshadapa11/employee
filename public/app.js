@@ -157,8 +157,8 @@ async function showApp() {
   hoursWeek = weekStart(today());
   dashWeek = weekStart(today());
   myWeek = weekStart(today());
-  if (isStaff()) selectedStaffId = 'self'; // the server always uses the staff login's own record
-  else await loadStaff();
+  await loadStaff(); // staff logins get just their own record
+  if (isStaff()) selectedStaffId = String(ME.staff_id);
   route();
 }
 
@@ -190,10 +190,9 @@ const VIEWS = {
   payments: { title: 'Payments', load: () => loadPayments() },
   staff: { title: 'Staff', load: () => renderStaff() },
   settings: { title: 'Settings', load: () => { if (!isStaff()) loadLogins(); } },
-  my: { title: 'My hours', load: () => loadMy() },
   notifications: { title: 'Notifications', load: () => loadNotifications() },
 };
-const STAFF_VIEWS = ['my', 'add', 'settings', 'notifications'];
+const STAFF_VIEWS = ['home', 'weeks', 'add', 'payments', 'settings', 'notifications'];
 
 function go(view) {
   if (location.hash === '#' + view) route();
@@ -203,9 +202,9 @@ function go(view) {
 function route() {
   if ($('#app-view').classList.contains('hidden')) return;
   if (sheet.open) closeSheet();
-  const allowed = (v) => VIEWS[v] && (isStaff() ? STAFF_VIEWS.includes(v) : v !== 'my');
+  const allowed = (v) => VIEWS[v] && (!isStaff() || STAFF_VIEWS.includes(v));
   const wanted = location.hash.slice(1);
-  const name = allowed(wanted) ? wanted : (isStaff() ? 'my' : 'home');
+  const name = allowed(wanted) ? wanted : 'home';
   $$('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   $$('main > section').forEach((s) => s.classList.toggle('hidden', s.dataset.view !== name));
   $('#view-title').textContent = name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
@@ -393,7 +392,7 @@ function renderPayday(d) {
             <span class="item-sub">${hours(r.minutes)}</span>
           </span>
           <span class="amt">${money(r.amount_pence)}</span>
-          ${r.paid ? statusBadge(true) : `<button class="btn sm" data-pay-${r.src}="${r.idx}">Mark paid</button>`}
+          ${r.paid || isStaff() ? statusBadge(r.paid) : `<button class="btn sm" data-pay-${r.src}="${r.idx}">Mark paid</button>`}
         </div>`).join('')}</div>` : '<div class="due-empty">No hours recorded for that week.</div>'}
     </div>`;
   $('#due-card').innerHTML = `
@@ -704,10 +703,7 @@ async function loadHoursList() {
   $('#hours-title').textContent = weekName(hoursWeek);
   $('#hours-week').textContent = weekLabel(hoursWeek);
   if (!selectedStaffId) { $('#hours-list').innerHTML = ''; $('#hours-summary').innerHTML = ''; return; }
-  const showMoney = !isStaff();
-  const shifts = showMoney
-    ? await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`)
-    : (await api(`/my?week=${hoursWeek}`)).shifts;
+  const shifts = await api(`/shifts?staff_id=${selectedStaffId}&week_start=${hoursWeek}`);
   shifts.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
   seedPresets(shifts);
   renderPresets();
@@ -720,7 +716,7 @@ async function loadHoursList() {
   $('#hours-summary').innerHTML = shifts.length ? `
     <div class="summary-bar">
       <span>${esc(who)} · <strong>${hours(total)}</strong></span>
-      <span>${showMoney ? `<strong>${money(pay)}</strong> ` : ''}${statusBadge(paid)}</span>
+      <span><strong>${money(pay)}</strong> ${statusBadge(paid)}</span>
     </div>` : '';
   $('#hours-list').innerHTML = shifts.length ? shifts.map((s) => {
     const d = utc(s.shift_date);
@@ -729,7 +725,7 @@ async function loadHoursList() {
       <div class="date-block"><div class="d">${DAYS[d.getUTCDay()]}</div><div class="n">${d.getUTCDate()}</div></div>
       <div class="item-main">
         <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
-        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${showMoney ? ' · ' + money(shiftPay(s)) : ''}${s.note ? ' · ' + esc(s.note) : ''}${showMoney && s.created_by_role === 'staff' ? ' · added by ' + esc(s.created_by_name) : ''}</span>
+        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${' · ' + money(shiftPay(s))}${s.note ? ' · ' + esc(s.note) : ''}${!isStaff() && s.created_by_role === 'staff' ? ' · added by ' + esc(s.created_by_name) : ''}</span>
         ${messageLine(s)}
       </div>
       ${isStaff()
@@ -862,9 +858,9 @@ function renderWeeks() {
       </div>
       <div class="item-sub">${hours(w.minutes)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}${!w.paid ? ` · payday ${fmtDate(w.payday)}${w.payday < today() ? ' (overdue)' : ''}` : ''}${w.paid ? ` · paid ${fmtDate(w.paid_on)}${w.method ? ' by ' + esc(w.method.toLowerCase()) : ''}` : ''}</div>
       <div class="details hidden" id="detail-${i}"></div>
-      <div class="card-actions" ${w.paid ? 'style="grid-template-columns:1fr"' : ''}>
+      <div class="card-actions" ${w.paid || isStaff() ? 'style="grid-template-columns:1fr"' : ''}>
         <button class="btn ghost sm" data-detail="${i}">${icon('list')} Shifts</button>
-        ${w.paid ? '' : `<button class="btn success sm" data-pay="${i}">${icon('check')} Mark paid</button>`}
+        ${w.paid || isStaff() ? '' : `<button class="btn success sm" data-pay="${i}">${icon('check')} Mark paid</button>`}
       </div>
     </div>`;
   }).join('') : emptyState(weeksStatus === 'unpaid' ? 'check' : 'calendar', msg);
@@ -962,7 +958,7 @@ async function loadPayments() {
         <span class="item-sub">${fmtDate(p.paid_on)}${p.method ? ' · ' + esc(p.method) : ''} · ${hours(p.minutes)}</span>
         <span class="item-sub">Week ${weekLabel(p.week_start)}${p.note ? ' · ' + esc(p.note) : ''}</span>
       </span>
-      <button class="icon-btn" data-undo="${p.id}" aria-label="Undo payment">${icon('undo')}</button>
+      ${isStaff() ? '' : `<button class="icon-btn" data-undo="${p.id}" aria-label="Undo payment">${icon('undo')}</button>`}
     </div>`).join('') : emptyState('wallet', 'No payments yet.');
 }
 $('#payments-staff').addEventListener('change', loadPayments);
@@ -981,62 +977,6 @@ $('#payments-list').addEventListener('click', async (e) => {
     toast('Payment undone');
     loadPayments();
   }
-});
-
-// ---------- my hours (staff logins) ----------
-let myWeek = null;
-
-async function loadMy() {
-  const d = await api(`/my?week=${myWeek}`);
-  myWeek = d.week_start;
-  const name = weekName(d.week_start);
-  $('#view-title').textContent = 'My hours';
-  $('#my-title').textContent = name;
-  $('#my-week').textContent = weekLabel(d.week_start);
-  $('#my-hours').textContent = hours(d.total_minutes);
-  $('#my-payday').textContent = `Payday ${fmtDate(d.payday)}`;
-  $('#my-status').innerHTML = d.paid === null ? '' : statusBadge(d.paid).replace('class="badge', 'class="badge lg');
-  $('#my-shifts').innerHTML = d.shifts.length ? d.shifts.map((s) => {
-    const dt = utc(s.shift_date);
-    return `
-    <div class="item">
-      <div class="date-block"><div class="d">${DAYS[dt.getUTCDay()]}</div><div class="n">${dt.getUTCDate()}</div></div>
-      <div class="item-main">
-        <span class="item-title">${s.start_time} – ${s.end_time} ${s.end_time <= s.start_time ? `<span class="badge night">${icon('moon')}+1 day</span>` : ''}</span>
-        <span class="item-sub">${hours(s.minutes)}${s.break_minutes ? ` · ${s.break_minutes}m break` : ''}${s.note ? ' · ' + esc(s.note) : ''}</span>
-        ${messageLine(s)}
-      </div>
-      <div class="item-actions"><button class="icon-btn" data-msg='${esc(JSON.stringify(s))}' aria-label="Message admin about this shift">${icon('message')}</button></div>
-    </div>`;
-  }).join('') : emptyState('calendar', 'No shifts in this week. Tap Add hours to enter one.');
-  $('#my-weeks').innerHTML = d.weeks.length ? d.weeks.map((w) => `
-    <button class="item" data-week="${w.week_start}">
-      <span class="item-main">
-        <span class="item-title">${weekName(w.week_start)}</span>
-        <span class="item-sub">${weekLabel(w.week_start)} · ${w.shift_count} shift${w.shift_count > 1 ? 's' : ''}</span>
-        <span class="item-sub">Payday ${fmtDate(w.payday)}</span>
-      </span>
-      <span class="item-end">
-        <span class="item-amount">${hours(w.minutes)}</span>
-        ${statusBadge(w.paid)}
-      </span>
-    </button>`).join('') : emptyState('clock', 'No hours recorded yet.');
-}
-
-$('#my-switch').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-step]');
-  if (!b) return;
-  const step = Number(b.dataset.step);
-  myWeek = step === 0 ? weekStart(today()) : addDays(myWeek, step * 7);
-  loadMy();
-});
-$('#my-shifts').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-msg]');
-  if (b) openMessageSheet(JSON.parse(b.dataset.msg), loadMy);
-});
-$('#my-weeks').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-week]');
-  if (b) { myWeek = b.dataset.week; loadMy(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 });
 
 // ---------- logins (admins) ----------

@@ -212,30 +212,6 @@
         <div class="list" id="staff-list"></div>
       </section>
 
-      <!-- My hours (staff logins) -->
-      <section data-view="my" class="hidden">
-        <div class="week-switch" id="my-switch">
-          <button class="icon-btn" data-step="-1" aria-label="Previous week"><i data-icon="chevronLeft"></i></button>
-          <button class="week-switch-label" data-step="0" aria-label="Go to this week">
-            <strong id="my-title">This week</strong>
-            <span id="my-week"></span>
-          </button>
-          <button class="icon-btn" data-step="1" aria-label="Next week"><i data-icon="chevronRight"></i></button>
-        </div>
-        <div class="hero single">
-          <div>
-            <div class="hero-label">Hours worked</div>
-            <div class="hero-value" id="my-hours">0h 00m</div>
-            <div class="hero-label" id="my-payday"></div>
-          </div>
-          <div id="my-status"></div>
-        </div>
-        <h2 class="section-title">Shifts</h2>
-        <div class="list" id="my-shifts"></div>
-        <h2 class="section-title">Recent weeks</h2>
-        <div class="list" id="my-weeks"></div>
-      </section>
-
       <!-- Notifications -->
       <section data-view="notifications" class="hidden">
         <div class="card push-card hidden" id="push-card">
@@ -275,8 +251,6 @@
       <button data-view="add" class="tab-add" aria-label="Add hours"><span class="tab-add-circle"><i data-icon="plus"></i></span><span>Add</span></button>
       <button data-view="payments"><i data-icon="wallet"></i><span>Paid</span></button>
       <button data-view="staff"><i data-icon="users"></i><span>Staff</span></button>
-      <button data-view="my" class="staff-only"><i data-icon="clock"></i><span>My hours</span></button>
-      <button data-view="settings" class="staff-only"><i data-icon="settings"></i><span>Settings</span></button>
     </nav>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
