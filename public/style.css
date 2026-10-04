@@ -1,48 +1,55 @@
-/* Mobile-first design. Calm, high-contrast palette; tokens switch for dark mode. */
+/* Mobile-first design. Palette: silver-grey surfaces, blue as the main colour,
+   yellow for highlights. Tokens switch for dark mode. */
 :root {
-  --bg: #F3F5F9;
+  --bg: #E9ECF0;          /* silver-grey page */
   --surface: #FFFFFF;
-  --surface-2: #EDF0F5;
-  --text: #0F172A;
-  --muted: #5B6476;
-  --border: #E2E7EF;
-  --primary: #2563EB;
+  --surface-2: #E1E5EA;   /* silver controls */
+  --text: #0F1B33;
+  --muted: #566070;
+  --border: #CFD5DD;
+  --primary: #1D4ED8;     /* blue */
   --primary-ink: #FFFFFF;
-  --primary-soft: #E7EEFD;
+  --primary-soft: #DFE8FB;
+  --accent: #FACC15;      /* yellow */
+  --accent-ink: #1C1A05;
+  --accent-soft: #FEF5CC;
   --paid: #047857;
   --paid-soft: #E3F5EC;
   --unpaid: #B45309;
   --unpaid-soft: #FDF1E1;
   --danger: #DC2626;
   --danger-soft: #FDECEC;
-  --hero-bg: #1E3A8A;
+  --hero-bg: #1E3A8A;     /* deep blue cards */
   --hero-ink: #FFFFFF;
-  --hero-muted: #BFD0FA;
-  --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 4px 16px rgba(15, 23, 42, .06);
+  --hero-muted: #C3D2F7;
+  --shadow: 0 1px 2px rgba(15, 27, 51, .05), 0 4px 16px rgba(15, 27, 51, .08);
   --radius: 16px;
   --tabbar-h: 64px;
   --safe-b: env(safe-area-inset-bottom, 0px);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0B1120;
-    --surface: #131B2E;
-    --surface-2: #1C2540;
-    --text: #E8ECF4;
-    --muted: #98A2B8;
-    --border: #25304A;
-    --primary: #6B9BFA;
+    --bg: #12161D;        /* graphite */
+    --surface: #1B212B;
+    --surface-2: #262E3A;
+    --text: #E9EDF3;
+    --muted: #A0A9B8;
+    --border: #323B49;
+    --primary: #6C9CFB;
     --primary-ink: #0B1120;
-    --primary-soft: #1A2A4D;
+    --primary-soft: #1C2A47;
+    --accent: #FACC15;
+    --accent-ink: #1C1A05;
+    --accent-soft: #3A3210;
     --paid: #34D399;
     --paid-soft: #0F2E25;
-    --unpaid: #FBBF24;
-    --unpaid-soft: #33260C;
+    --unpaid: #FB923C;
+    --unpaid-soft: #36200F;
     --danger: #F87171;
     --danger-soft: #3A1717;
-    --hero-bg: #1A2A55;
+    --hero-bg: #1A2C5C;
     --hero-ink: #F1F5FF;
-    --hero-muted: #A9BDF0;
+    --hero-muted: #AFC2F2;
     --shadow: none;
   }
 }
@@ -456,3 +463,20 @@ body.role-staff #open-notifications { display: inline-grid; }
 .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-top: 6px; flex: none; }
 .due-section { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--hero-ink) 18%, transparent); }
 .badge.overdue-badge { background: #FECACA; color: #7F1D1D; }
+
+/* ---------- Yellow highlights ---------- */
+.tab-add-circle {
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.tabbar button { position: relative; }
+.tabbar button.active:not(.tab-add)::before {
+  content: ''; position: absolute; top: 0; left: 30%; right: 30%; height: 3px;
+  border-radius: 0 0 3px 3px; background: var(--accent);
+}
+.due-kicker { color: var(--accent); }
+.due-row .btn { background: var(--accent); color: var(--accent-ink); }
+.badge.today { background: var(--accent); color: var(--accent-ink); }
+.login-icon { background: var(--primary); color: var(--accent); }
+.notice { background: var(--accent-soft); }
+.chip[aria-checked="true"] { box-shadow: inset 0 -3px 0 var(--accent); }
