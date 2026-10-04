@@ -494,3 +494,4 @@ body.role-staff #open-notifications { display: inline-grid; }
 }
 .appbar .icon-btn:active { background: color-mix(in srgb, var(--hero-ink) 22%, transparent); }
 .appbar .bell-count { border-color: var(--hero-bg); }
+.appbar h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px; }

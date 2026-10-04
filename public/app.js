@@ -182,6 +182,16 @@ $('#logout').addEventListener('click', async () => {
   showLogin();
 });
 
+// Home header: greeting by time of day plus the person's first name.
+function greeting() {
+  const h = new Date().getHours();
+  const part = h >= 5 && h < 12 ? 'Good morning' : h >= 12 && h < 17 ? 'Good afternoon' : 'Good evening';
+  const raw = (ME && (ME.staff_name || ME.username)) || '';
+  const first = raw.trim().split(/\s+/)[0] || '';
+  const name = first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
+  return name ? `${part}, ${name}` : part;
+}
+
 // ---------- navigation (hash based, so the phone's back button works) ----------
 const VIEWS = {
   home: { title: 'This week', load: () => loadDashboard() },
@@ -207,7 +217,8 @@ function route() {
   const name = allowed(wanted) ? wanted : 'home';
   $$('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   $$('main > section').forEach((s) => s.classList.toggle('hidden', s.dataset.view !== name));
-  $('#view-title').textContent = name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
+  $('#view-title').textContent = name === 'home' ? greeting()
+    : name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
   window.scrollTo(0, 0);
   VIEWS[name].load();
   if (name !== 'notifications') refreshBell();
@@ -295,7 +306,7 @@ async function loadDashboard() {
   const d = await api('/dashboard' + (dashWeek ? `?week=${dashWeek}` : ''));
   dashWeek = d.week_start;
   const name = weekName(d.week_start);
-  $('#view-title').textContent = name;
+  $('#view-title').textContent = greeting();
   $('#dash-title').textContent = name;
   $('#dash-week').textContent = weekLabel(d.week_start);
   const t = d.totals;
