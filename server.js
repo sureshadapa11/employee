@@ -2,6 +2,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { query, one, ensureSchema, hashPassword, verifyPassword } = require('./lib/db');
+const { notify, adminIds, staffLoginIds, PUSH_ENABLED } = require('./lib/notify');
 const { WEEK_START_DAY, payday, dueWeek, addDays, isValidDate, parseTime, shiftMinutes, weekStart, weekEnd } = require('./lib/time');
 
 const app = express();
@@ -83,6 +84,17 @@ const toPence = (v) => {
 // Today's date where the business is, not where the server is.
 const localToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
 
+// Short labels for notification text, e.g. "Sat 3 Oct" and "12h 00m".
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDay = (iso) => {
+  const d = new Date(iso + 'T00:00:00Z');
+  return `${DAY_NAMES[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]}`;
+};
+const fmtHours = (mins) => `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+const fmtMoney = (pence) => CURRENCY + (pence / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const shiftText = (s) => `${fmtDay(s.shift_date)} · ${s.start_time}–${s.end_time} · ${fmtHours(s.minutes)}`;
+
 async function getStaff(id) {
   const s = await one('SELECT * FROM staff WHERE id = $1', [Number(id) || 0]);
   if (!s) throw new HttpError(404, 'Staff not found');
@@ -163,8 +175,98 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Daily reminders (Vercel Cron calls this once a day) ----
+const MISSING_DAYS = 3;
+
+app.get('/api/cron/daily', h(async (req) => {
+  if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+    throw new HttpError(401, 'Not allowed');
+  }
+  const today = localToday();
+  const admins = await adminIds();
+  const weeks = await weeklySummary();
+  const sent = [];
+
+  // Payday: what is due today.
+  const dueWs = dueWeek(today);
+  if (payday(dueWs) === today) {
+    const due = weeks.filter((w) => w.week_start === dueWs && !w.paid);
+    if (due.length) {
+      const total = due.reduce((t, w) => t + w.amount_pence, 0);
+      await notify(admins, {
+        kind: 'payday', title: `Pay due today: ${fmtMoney(total)}`,
+        body: `${due.length} ${due.length === 1 ? 'person' : 'people'} · week ${fmtDay(dueWs)} – ${fmtDay(weekEnd(dueWs))}`,
+        link: 'home', dedupe: `payday:${today}`,
+      });
+      sent.push('payday');
+    }
+  }
+
+  // Overdue: unpaid weeks whose payday has passed.
+  const overdue = weeks.filter((w) => !w.paid && w.payday < today);
+  if (overdue.length) {
+    const total = overdue.reduce((t, w) => t + w.amount_pence, 0);
+    await notify(admins, {
+      kind: 'overdue', title: `Overdue: ${fmtMoney(total)}`,
+      body: `${overdue.length} unpaid ${overdue.length === 1 ? 'week' : 'weeks'} past payday`,
+      link: 'home', dedupe: `overdue:${today}`,
+    });
+    sent.push('overdue');
+  }
+
+  // Missing hours: active staff with no shift in the last few days (once per gap).
+  const lastShifts = await query(`
+    SELECT st.id, st.name, MAX(s.shift_date) AS last_date
+    FROM staff st LEFT JOIN shifts s ON s.staff_id = st.id
+    WHERE st.active = 1 GROUP BY st.id, st.name
+  `);
+  for (const s of lastShifts) {
+    if (!s.last_date || s.last_date >= addDays(today, -MISSING_DAYS)) continue;
+    await notify(admins, {
+      kind: 'missing', title: `${s.name} hasn't entered hours`,
+      body: `Last shift was ${fmtDay(s.last_date)}`, link: 'weeks', dedupe: `missing:${s.id}:${s.last_date}`,
+    });
+    sent.push(`missing:${s.id}`);
+  }
+  return { ok: true, today, sent };
+}));
+
 // ---- Everyone who is logged in ----
 app.use('/api', requireUser);
+
+// ---- Notifications ----
+app.get('/api/notifications', h(async (req) => {
+  const [items, unread] = await Promise.all([
+    query('SELECT id, kind, title, body, link, read_at, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50', [req.user.id]),
+    one('SELECT COUNT(*)::int AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id]),
+  ]);
+  return { items, unread: unread.n, push_key: PUSH_ENABLED ? process.env.VAPID_PUBLIC_KEY : null };
+}));
+
+app.get('/api/notifications/count', h(async (req) => {
+  const { n } = await one('SELECT COUNT(*)::int AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id]);
+  return { unread: n };
+}));
+
+app.post('/api/notifications/read', h(async (req) => {
+  await query('UPDATE notifications SET read_at = now() WHERE user_id = $1 AND read_at IS NULL', [req.user.id]);
+  return { ok: true };
+}));
+
+app.post('/api/push/subscribe', h(async (req) => {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys?.p256dh || !keys?.auth) throw bad('Invalid subscription');
+  // One phone belongs to whoever subscribed last on it.
+  await query(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES ($1, $2, $3, $4)
+               ON CONFLICT (endpoint) DO UPDATE SET user_id = $1, p256dh = $3, auth = $4`,
+    [req.user.id, String(endpoint), String(keys.p256dh), String(keys.auth)]);
+  return { ok: true };
+}));
+
+app.post('/api/push/unsubscribe', h(async (req) => {
+  await query('DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2', [String(req.body?.endpoint || ''), req.user.id]);
+  return { ok: true };
+}));
 
 app.get('/api/me', h(async (req) => {
   const u = req.user;
@@ -247,10 +349,14 @@ app.post('/api/shifts', h(async (req) => {
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(staff.id, ws);
   await assertNoOverlap(staff.id, v);
-  return forViewer(req, await one(`
+  const shift = await one(`
     INSERT INTO shifts (staff_id, shift_date, start_time, end_time, break_minutes, minutes, rate_pence, week_start, note, created_by)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
-  `, [staff.id, v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, staff.rate_pence, ws, v.note, req.user.id]));
+  `, [staff.id, v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, staff.rate_pence, ws, v.note, req.user.id]);
+  if (isStaffLogin(req)) {
+    await notify(await adminIds(), { kind: 'shift', title: `${staff.name} added hours`, body: shiftText(shift), link: 'weeks' });
+  }
+  return forViewer(req, shift);
 }));
 
 const SUBMITTED_LOCKED = "Submitted hours can't be changed. Add a message for the admin instead.";
@@ -263,11 +369,18 @@ app.put('/api/shifts/:id', h(async (req) => {
   const ws = weekStart(v.shift_date);
   await assertWeekUnpaid(old.staff_id, ws);
   await assertNoOverlap(old.staff_id, v, old.id);
-  return forViewer(req, await one(`
+  const shift = await one(`
     UPDATE shifts SET shift_date = $1, start_time = $2, end_time = $3, break_minutes = $4, minutes = $5, week_start = $6, note = $7,
       staff_note = NULL, staff_note_at = NULL
     WHERE id = $8 RETURNING *
-  `, [v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, ws, v.note, old.id]));
+  `, [v.shift_date, v.start_time, v.end_time, v.break_minutes, v.minutes, ws, v.note, old.id]);
+  const changed = ['shift_date', 'start_time', 'end_time', 'break_minutes'].some((k) => old[k] !== shift[k]);
+  if (changed || old.staff_note) {
+    await notify(await staffLoginIds(old.staff_id), {
+      kind: 'shift-updated', title: 'Your shift was updated', body: `Now ${shiftText(shift)}`, link: 'my',
+    });
+  }
+  return forViewer(req, shift);
 }));
 
 app.delete('/api/shifts/:id', h(async (req) => {
@@ -275,6 +388,9 @@ app.delete('/api/shifts/:id', h(async (req) => {
   const old = await loadOwnShift(req);
   await assertWeekUnpaid(old.staff_id, old.week_start);
   await query('DELETE FROM shifts WHERE id = $1', [old.id]);
+  await notify(await staffLoginIds(old.staff_id), {
+    kind: 'shift-updated', title: 'A shift was removed', body: shiftText(old), link: 'my',
+  });
   return { ok: true };
 }));
 
@@ -286,6 +402,10 @@ app.put('/api/shifts/:id/message', h(async (req) => {
   if (!isStaffLogin(req) && text) throw bad('Only staff can leave a message');
   await query('UPDATE shifts SET staff_note = $1, staff_note_at = $2 WHERE id = $3',
     [text || null, text ? new Date().toISOString() : null, shift.id]);
+  if (text) {
+    const staff = await getStaff(shift.staff_id);
+    await notify(await adminIds(), { kind: 'message', title: `Message from ${staff.name}`, body: `${text} (${shiftText(shift)})`, link: 'home' });
+  }
   return { ok: true };
 }));
 
@@ -393,10 +513,15 @@ app.post('/api/payments', h(async (req) => {
   if (!isValidDate(paidOn)) throw bad('Invalid payment date');
   const week = (await weeklySummary(staff.id)).find((w) => w.week_start === ws);
   if (!week) throw bad('No hours recorded for that week');
-  return one(`
+  const payment = await one(`
     INSERT INTO payments (staff_id, week_start, minutes, amount_pence, paid_on, method, note)
     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
   `, [staff.id, ws, week.minutes, week.amount_pence, paidOn, method || null, note || null]);
+  // Staff see hours only, so no amount in their notification.
+  await notify(await staffLoginIds(staff.id), {
+    kind: 'paid', title: "You've been paid", body: `Week ${fmtDay(ws)} – ${fmtDay(weekEnd(ws))} · ${fmtHours(week.minutes)}`, link: 'my',
+  });
+  return payment;
 }));
 
 app.delete('/api/payments/:id', h(async (req) => {

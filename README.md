@@ -44,6 +44,9 @@ npm start          # http://localhost:3000
 | `CURRENCY` | `£` | Currency symbol |
 | `APP_TIMEZONE` | `Europe/London` | Time zone used for "today" and "this week" |
 | `PORT` | `3000` | Local HTTP port |
+| `PAY_OFFSET_DAYS` | `14` | Days from week start to payday |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | – | Phone push notifications (generate with `npx web-push generate-vapid-keys`) |
+| `CRON_SECRET` | – | Protects `/api/cron/daily` (payday, overdue and missing-hours reminders, run by Vercel Cron at 08:00 UTC) |
 
 Failed logins are limited to 10 per IP address per 15 minutes.
 

@@ -31,6 +31,7 @@ const ICONS = {
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
   message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -173,6 +174,7 @@ $('#login-form').addEventListener('submit', async (e) => {
 });
 
 $('#logout').addEventListener('click', async () => {
+  await pushOff().catch(() => {});
   await api('/logout', { method: 'POST' }).catch(() => {});
   history.replaceState(null, '', location.pathname);
   ME = null;
@@ -189,8 +191,9 @@ const VIEWS = {
   staff: { title: 'Staff', load: () => renderStaff() },
   settings: { title: 'Settings', load: () => { if (!isStaff()) loadLogins(); } },
   my: { title: 'My hours', load: () => loadMy() },
+  notifications: { title: 'Notifications', load: () => loadNotifications() },
 };
-const STAFF_VIEWS = ['my', 'add', 'settings'];
+const STAFF_VIEWS = ['my', 'add', 'settings', 'notifications'];
 
 function go(view) {
   if (location.hash === '#' + view) route();
@@ -208,6 +211,7 @@ function route() {
   $('#view-title').textContent = name === 'add' && shiftForm.elements.edit_id.value ? 'Edit shift' : VIEWS[name].title;
   window.scrollTo(0, 0);
   VIEWS[name].load();
+  if (name !== 'notifications') refreshBell();
 }
 window.addEventListener('hashchange', route);
 $('#tabbar').addEventListener('click', (e) => {
@@ -215,6 +219,7 @@ $('#tabbar').addEventListener('click', (e) => {
   if (b) go(b.dataset.view);
 });
 $('#open-settings').addEventListener('click', () => go('settings'));
+$('#open-notifications').addEventListener('click', () => go('notifications'));
 
 // ---------- staff ----------
 async function loadStaff() {
@@ -1130,6 +1135,123 @@ $('#logins-list').addEventListener('click', async (e) => {
       catch (err) { toast(err.message); }
     }
   }
+});
+
+// ---------- notifications ----------
+const NOTIF_ICONS = { shift: 'clock', message: 'message', paid: 'check', 'shift-updated': 'pencil', payday: 'wallet', overdue: 'alert', missing: 'calendar' };
+
+function timeAgo(iso) {
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days < 7 ? `${days}d ago` : fmtDate(new Date(iso).toISOString().slice(0, 10));
+}
+
+function setBell(n) {
+  const el = $('#bell-count');
+  el.textContent = n > 9 ? '9+' : String(n);
+  el.classList.toggle('hidden', !n);
+}
+
+async function refreshBell() {
+  if (!ME) return;
+  try { setBell((await api('/notifications/count')).unread); } catch { /* offline or logged out */ }
+}
+setInterval(() => { if (document.visibilityState === 'visible') refreshBell(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshBell(); });
+
+let notifItems = [];
+async function loadNotifications() {
+  const d = await api('/notifications');
+  notifItems = d.items;
+  $('#notif-list').innerHTML = d.items.length ? d.items.map((n, i) => `
+    <button class="item notif ${n.read_at ? '' : 'unread'}" data-notif="${i}">
+      <span class="avatar">${icon(NOTIF_ICONS[n.kind] || 'bell')}</span>
+      <span class="item-main">
+        <span class="item-title">${esc(n.title)}</span>
+        ${n.body ? `<span class="item-sub">${esc(n.body)}</span>` : ''}
+        <span class="notif-time">${timeAgo(n.created_at)}</span>
+      </span>
+      ${n.read_at ? '' : '<span class="notif-dot" aria-label="Unread"></span>'}
+    </button>`).join('') : emptyState('bell', 'No notifications yet.');
+  if (d.unread) { await api('/notifications/read', { method: 'POST' }).catch(() => {}); }
+  setBell(0);
+  setupPushCard(d.push_key);
+}
+$('#notif-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-notif]');
+  const n = b && notifItems[b.dataset.notif];
+  if (n && n.link) go(n.link);
+});
+
+// ---- Phone push notifications ----
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let pushKey = null;
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+function urlBase64ToUint8Array(base64) {
+  const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function setupPushCard(key) {
+  pushKey = key;
+  const card = $('#push-card');
+  const text = $('#push-text');
+  const on = $('#push-on');
+  const off = $('#push-off');
+  card.classList.toggle('hidden', !key);
+  if (!key) return;
+  on.classList.add('hidden'); off.classList.add('hidden');
+  if (isIOS() && !isStandalone()) {
+    text.textContent = 'On iPhone: tap the Share button, then "Add to Home Screen". Open the app from the new icon and turn notifications on here.';
+    return;
+  }
+  if (!pushSupported()) { text.textContent = "This browser can't show notifications. Try Chrome on Android, or add the app to your iPhone home screen."; return; }
+  if (Notification.permission === 'denied') { text.textContent = 'Notifications are blocked for this app in your phone settings. Allow them there, then come back.'; return; }
+  const sub = await currentSubscription();
+  if (sub) {
+    text.textContent = "On. You'll get alerts on this phone even when the app is closed.";
+    off.classList.remove('hidden');
+  } else {
+    text.textContent = 'Get alerts on your lock screen, even when the app is closed.';
+    on.classList.remove('hidden');
+  }
+}
+
+async function pushOn() {
+  if (await Notification.requestPermission() !== 'granted') { setupPushCard(pushKey); return; }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pushKey) });
+  await api('/push/subscribe', { method: 'POST', body: sub.toJSON() });
+  toast('Notifications turned on');
+  setupPushCard(pushKey);
+}
+
+async function pushOff() {
+  const sub = await currentSubscription();
+  if (!sub) return;
+  await api('/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {});
+  await sub.unsubscribe();
+}
+
+$('#push-on').addEventListener('click', () => pushOn().catch((err) => toast(err.message || 'Could not turn on notifications')));
+$('#push-off').addEventListener('click', async () => {
+  await pushOff().catch(() => {});
+  toast('Notifications turned off on this phone');
+  setupPushCard(pushKey);
 });
 
 // ---------- settings ----------

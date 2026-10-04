@@ -438,3 +438,20 @@ section[data-view="home"] > .hero:not(.due) .hero-divider { background: var(--bo
 .msg-card .msg-line { margin-top: 0; }
 .notice { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--primary-soft); font-size: 14px; }
 .textarea { min-height: 96px; padding: 12px 14px; resize: vertical; line-height: 1.4; }
+
+/* ---------- Notifications ---------- */
+.appbar-actions { display: flex; gap: 8px; }
+.bell { position: relative; }
+.bell-count {
+  position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700;
+  display: grid; place-items: center; border: 2px solid var(--bg);
+}
+body.role-staff #open-notifications { display: inline-grid; }
+.push-head { display: flex; align-items: center; gap: 8px; }
+.notif { align-items: flex-start; }
+.notif.unread { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); background: color-mix(in srgb, var(--primary-soft) 45%, var(--surface)); }
+.notif .avatar { width: 40px; height: 40px; }
+.notif .avatar svg.icon { width: 20px; height: 20px; }
+.notif-time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-top: 6px; flex: none; }

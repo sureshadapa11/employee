@@ -13,6 +13,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Hours">
 </head>
 <body>
   <!-- Login -->
@@ -37,7 +41,12 @@
   <div id="app-view" class="hidden">
     <header class="appbar">
       <h1 id="view-title">This week</h1>
-      <button class="icon-btn" id="open-settings" aria-label="Settings"><i data-icon="settings"></i></button>
+      <div class="appbar-actions">
+        <button class="icon-btn bell" id="open-notifications" aria-label="Notifications">
+          <i data-icon="bell"></i><span class="bell-count hidden" id="bell-count"></span>
+        </button>
+        <button class="icon-btn" id="open-settings" aria-label="Settings"><i data-icon="settings"></i></button>
+      </div>
     </header>
 
     <main>
@@ -225,6 +234,17 @@
         <div class="list" id="my-shifts"></div>
         <h2 class="section-title">Recent weeks</h2>
         <div class="list" id="my-weeks"></div>
+      </section>
+
+      <!-- Notifications -->
+      <section data-view="notifications" class="hidden">
+        <div class="card push-card hidden" id="push-card">
+          <div class="push-head"><i data-icon="bell"></i><strong>Notifications on this phone</strong></div>
+          <p class="muted" id="push-text"></p>
+          <button class="btn primary block hidden" id="push-on">Turn on</button>
+          <button class="btn ghost block hidden" id="push-off">Turn off on this phone</button>
+        </div>
+        <div class="list" id="notif-list"></div>
       </section>
 
       <!-- Settings -->
